@@ -102,9 +102,12 @@ struct ContentView: View {
     private func captureAndDescribe() {
         guard let frame = cameraManager.latestFrame else { return }
 
-        // Load model on first use if needed
+        // Load model on first use, then auto-capture
         guard vlmService.isReady else {
-            Task { await vlmService.load() }
+            Task {
+                await vlmService.load()
+                captureAndDescribe()
+            }
             return
         }
 
