@@ -52,12 +52,15 @@ struct DQTextBoxView: View {
                     )
 
                 // Text content
-                VStack(alignment: .leading, spacing: 0) {
-                    if isThinking {
-                        thinkingView
-                    } else {
-                        typewriterText
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if isThinking {
+                            thinkingView
+                        } else {
+                            typewriterText
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 20)
@@ -66,6 +69,13 @@ struct DQTextBoxView: View {
             .padding(.horizontal, 16)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .animation(.easeOut(duration: 0.3), value: text.isEmpty && !isThinking)
+            .onChange(of: text) { _, newText in
+                startTypewriter(for: newText)
+            }
+            .onDisappear {
+                stopTypewriter()
+                stopCursorBlink()
+            }
         }
     }
 
