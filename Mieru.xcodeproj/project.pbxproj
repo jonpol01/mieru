@@ -239,7 +239,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = ZKJ47SNHYL;
+				DEVELOPMENT_TEAM = YOUR_TEAM_ID;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Mieru/App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Mieru;
@@ -256,7 +256,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				CODE_SIGN_ENTITLEMENTS = Mieru/App/Mieru.entitlements;
-				PRODUCT_BUNDLE_IDENTIFIER = "John-Soliva.Mieru";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.Mieru";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -272,7 +272,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = ZKJ47SNHYL;
+				DEVELOPMENT_TEAM = YOUR_TEAM_ID;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Mieru/App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Mieru;
@@ -289,7 +289,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				CODE_SIGN_ENTITLEMENTS = Mieru/App/Mieru.entitlements;
-				PRODUCT_BUNDLE_IDENTIFIER = "John-Soliva.Mieru";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.Mieru";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -510,3 +510,4 @@
 	};
 	rootObject = AA900001 /* Project object */;
 }
+
