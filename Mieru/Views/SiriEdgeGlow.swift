@@ -31,7 +31,7 @@ struct SiriEdgeGlow: View {
         GeometryReader { geo in
             if isActive {
                 ZStack {
-                    // Outer soft glow (wide blur)
+                    // Wide ambient glow
                     RoundedRectangle(cornerRadius: 44)
                         .strokeBorder(
                             AngularGradient(
@@ -39,10 +39,23 @@ struct SiriEdgeGlow: View {
                                 center: .center,
                                 angle: .degrees(rotation)
                             ),
-                            lineWidth: 8
+                            lineWidth: 16
+                        )
+                        .blur(radius: 40)
+                        .opacity(0.8 * pulse)
+
+                    // Outer soft glow
+                    RoundedRectangle(cornerRadius: 44)
+                        .strokeBorder(
+                            AngularGradient(
+                                colors: colors,
+                                center: .center,
+                                angle: .degrees(rotation + 15)
+                            ),
+                            lineWidth: 10
                         )
                         .blur(radius: 20)
-                        .opacity(0.6 * pulse)
+                        .opacity(0.9 * pulse)
 
                     // Mid glow
                     RoundedRectangle(cornerRadius: 44)
@@ -52,10 +65,10 @@ struct SiriEdgeGlow: View {
                                 center: .center,
                                 angle: .degrees(rotation + 30)
                             ),
-                            lineWidth: 4
+                            lineWidth: 6
                         )
-                        .blur(radius: 8)
-                        .opacity(0.8 * pulse)
+                        .blur(radius: 10)
+                        .opacity(1.0 * pulse)
 
                     // Sharp inner edge
                     RoundedRectangle(cornerRadius: 44)
@@ -65,8 +78,9 @@ struct SiriEdgeGlow: View {
                                 center: .center,
                                 angle: .degrees(rotation)
                             ),
-                            lineWidth: 2
+                            lineWidth: 3
                         )
+                        .blur(radius: 1)
                         .opacity(pulse)
                 }
                 .ignoresSafeArea()
@@ -94,7 +108,7 @@ struct SiriEdgeGlow: View {
             .easeInOut(duration: 1.5)
             .repeatForever(autoreverses: true)
         ) {
-            pulse = 0.6
+            pulse = 0.7
         }
     }
 }

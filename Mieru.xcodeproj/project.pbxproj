@@ -16,6 +16,7 @@
 		AA000007 /* VLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100007 /* VLMService.swift */; };
 		AA000008 /* TypewriterSFX.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100008 /* TypewriterSFX.swift */; };
 		AA000010 /* SiriEdgeGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100011 /* SiriEdgeGlow.swift */; };
+		AA000012 /* LanguageToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100013 /* LanguageToggle.swift */; };
 		AA000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA100009 /* Assets.xcassets */; };
 		AA000020 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = AA300001 /* MLX */; };
 		AA000021 /* MLXRandom in Frameworks */ = {isa = PBXBuildFile; productRef = AA300002 /* MLXRandom */; };
@@ -37,6 +38,7 @@
 		AA100009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA100010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA100011 /* SiriEdgeGlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriEdgeGlow.swift; sourceTree = "<group>"; };
+		AA100013 /* LanguageToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageToggle.swift; sourceTree = "<group>"; };
 		AA100099 /* Mieru.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mieru.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -111,6 +113,7 @@
 				AA100004 /* DQTextBoxView.swift */,
 				AA100005 /* ControlsOverlay.swift */,
 				AA100011 /* SiriEdgeGlow.swift */,
+				AA100013 /* LanguageToggle.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -223,6 +226,7 @@
 				AA000007 /* VLMService.swift in Sources */,
 				AA000008 /* TypewriterSFX.swift in Sources */,
 				AA000010 /* SiriEdgeGlow.swift in Sources */,
+				AA000012 /* LanguageToggle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
