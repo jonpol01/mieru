@@ -2,8 +2,7 @@
 //  VLMService.swift
 //  Mieru
 //
-//  On-device Gemma 4 vision-language model service.
-//  Adapted from VisionKit project's VLMService.
+//  On-device VLM service using MLX Swift.
 //
 
 import CoreImage
@@ -12,6 +11,8 @@ import MLX
 import MLXLMCommon
 import MLXRandom
 import MLXVLM
+
+// MARK: - VLMService
 
 @Observable
 @MainActor
@@ -43,11 +44,10 @@ class VLMService {
         switch loadState {
         case .idle:
             MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
-            statusMessage = "Downloading Gemma 4…"
-            let config = ModelConfiguration(id: "mlx-community/gemma-4-e4b-it-4bit")
-
+            statusMessage = "Downloading Gemma 4 E2B…"
             isDownloading = true; downloadProgress = 0; downloadedBytes = 0; totalBytes = 0
 
+            let config = ModelConfiguration(id: "mlx-community/gemma-4-e2b-it-4bit")
             let container = try await VLMModelFactory.shared.loadContainer(
                 configuration: config
             ) { [weak self] progress in
