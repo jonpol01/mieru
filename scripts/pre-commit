@@ -1,0 +1,23 @@
+#!/bin/bash
+# Pre-commit hook: strips personal Xcode credentials from project.pbxproj
+# before committing. Working copy keeps real values so Xcode still works.
+
+PBXPROJ="Mieru.xcodeproj/project.pbxproj"
+
+# Only run if pbxproj is staged
+if ! git diff --cached --name-only | grep -q "$PBXPROJ"; then
+    exit 0
+fi
+
+# Save original working copy
+cp "$PBXPROJ" "$PBXPROJ.bak"
+
+# Replace personal values with placeholders in the file
+sed -i '' 's/DEVELOPMENT_TEAM = [A-Z0-9]*;/DEVELOPMENT_TEAM = YOUR_TEAM_ID;/g' "$PBXPROJ"
+sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = ".*\.Mieru"/PRODUCT_BUNDLE_IDENTIFIER = "com.example.Mieru"/g' "$PBXPROJ"
+
+# Stage the cleaned version
+git add "$PBXPROJ"
+
+# Restore original working copy (so Xcode keeps working)
+mv "$PBXPROJ.bak" "$PBXPROJ"

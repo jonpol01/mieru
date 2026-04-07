@@ -74,10 +74,16 @@ class VLMService {
         }
     }
 
-    public func describe(pixelBuffer: CVPixelBuffer) async -> String {
+    public func describe(pixelBuffer: CVPixelBuffer, language: String = "ja") async -> String {
         guard !running else { return output }
         running = true
         defer { running = false }
+
+        let (systemPrompt, userPrompt) = language == "ja"
+            ? ("画像に映っているものを具体的に識別してください。ブランド名、商品名、人物、場所など、わかるものはそのまま名前で答えてください。簡潔に1〜3文で。日本語で答えてください。",
+               "これは何？")
+            : ("Identify what you see in the image. Name specific brands, products, people, places, or objects directly. Be concise, 1-3 sentences.",
+               "What is this?")
 
         do {
             let container = try await _load()
@@ -90,8 +96,8 @@ class VLMService {
 
             let userInput = UserInput(
                 chat: [
-                    .system("あなたはファンタジーRPGのナレーターです。画像に映っているものを、勇者が遭遇した場面として生き生きと、しかし簡潔に描写してください。1〜3文で。現在形を使い、日本語で答えてください。"),
-                    .user("何が見える？", images: [.ciImage(downscaled)])
+                    .system(systemPrompt),
+                    .user(userPrompt, images: [.ciImage(downscaled)])
                 ],
                 additionalContext: ["enable_thinking": false]
             )
