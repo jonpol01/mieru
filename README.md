@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="app_icon.png" width="128" height="128" alt="Mieru" style="border-radius: 24px;" />
+
 # Mieru
 
 ### On-device camera AI that identifies what you see — powered by Gemma 4 on iPhone.
