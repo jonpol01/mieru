@@ -29,6 +29,8 @@ struct DQTextBoxView: View {
     @State private var cursorTimer: Timer?
     @State private var sfx = TypewriterSFX()
     @State private var slimeFrame = 0
+    @State private var autoScroll = true
+    @State private var scrollViewHeight: CGFloat = 0
 
     /// Characters per second for the typewriter effect.
     private let charsPerSecond: Double = 20
@@ -52,15 +54,30 @@ struct DQTextBoxView: View {
                     )
 
                 // Text content
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if isThinking {
-                            thinkingView
-                        } else {
-                            typewriterText
+                GeometryReader { outerGeo in
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                if isThinking {
+                                    thinkingView
+                                } else {
+                                    typewriterText
+                                }
+
+                                // Bottom anchor
+                                Color.clear.frame(height: 1).id("bottom")
+                                    .onAppear { autoScroll = true }
+                                    .onDisappear { autoScroll = false }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .onChange(of: revealedCount) { _, _ in
+                            if autoScroll {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onAppear { scrollViewHeight = outerGeo.size.height }
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 20)
@@ -91,6 +108,7 @@ struct DQTextBoxView: View {
                     .offset(y: slimeFrame == i ? -6 : 0)
             }
         }
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .onAppear {
             Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in

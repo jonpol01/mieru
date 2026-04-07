@@ -74,10 +74,16 @@ class VLMService {
         }
     }
 
-    public func describe(pixelBuffer: CVPixelBuffer) async -> String {
+    public func describe(pixelBuffer: CVPixelBuffer, language: String = "ja") async -> String {
         guard !running else { return output }
         running = true
         defer { running = false }
+
+        let (systemPrompt, userPrompt) = language == "ja"
+            ? ("あなたはファンタジーRPGのナレーターです。画像に映っているものを、勇者が遭遇した場面として生き生きと、しかし簡潔に描写してください。1〜3文で。現在形を使い、日本語で答えてください。",
+               "何が見える？")
+            : ("You are a fantasy RPG narrator. Describe what you see in the image as a scene the hero has encountered. Be vivid but concise, 1-3 sentences. Use present tense. Answer in English.",
+               "What do you see?")
 
         do {
             let container = try await _load()
@@ -90,8 +96,8 @@ class VLMService {
 
             let userInput = UserInput(
                 chat: [
-                    .system("あなたはファンタジーRPGのナレーターです。画像に映っているものを、勇者が遭遇した場面として生き生きと、しかし簡潔に描写してください。1〜3文で。現在形を使い、日本語で答えてください。"),
-                    .user("何が見える？", images: [.ciImage(downscaled)])
+                    .system(systemPrompt),
+                    .user(userPrompt, images: [.ciImage(downscaled)])
                 ],
                 additionalContext: ["enable_thinking": false]
             )

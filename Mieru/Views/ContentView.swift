@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var isTyping = false
     @State private var isAutoMode = false
     @State private var autoTimer: Timer?
+    @State private var language = "ja"
 
     /// Tracks the generation to discard stale results.
     @State private var generation = 0
@@ -30,7 +31,7 @@ struct ContentView: View {
             CameraPreviewView(session: cameraManager.session)
                 .ignoresSafeArea()
 
-            // Layer 2: Status bar at top
+            // Layer 2: Status bar at top + language toggle
             VStack {
                 HStack(spacing: 8) {
                     Circle()
@@ -46,6 +47,9 @@ struct ContentView: View {
                         .foregroundColor(.white)
                         .shadow(color: .black.opacity(0.8), radius: 3)
                     Spacer()
+
+                    // Language toggle
+                    LanguageToggle(language: $language)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 60)
@@ -118,7 +122,7 @@ struct ContentView: View {
         descriptionText = ""
 
         Task {
-            let result = await vlmService.describe(pixelBuffer: frame)
+            let result = await vlmService.describe(pixelBuffer: frame, language: language)
 
             guard currentGen == generation else { return }
 
