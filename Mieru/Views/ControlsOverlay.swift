@@ -2,7 +2,7 @@
 //  ControlsOverlay.swift
 //  Mieru
 //
-//  Capture button, auto-mode toggle, and model status indicator.
+//  DQ-style しらべる / キャンセル button and model status.
 //
 
 import SwiftUI
@@ -15,76 +15,86 @@ struct ControlsOverlay: View {
     let downloadProgress: Float
 
     var onCapture: () -> Void
+    var onCancel: (() -> Void)?
     var onToggleAutoMode: () -> Void
 
     var body: some View {
-        VStack {
-            // Status bar at top
-            statusBar
-                .padding(.top, 60)
-
-            Spacer()
-
-            // Controls at bottom-right, above the text box
-            HStack {
-                Spacer()
-
-                VStack(spacing: 16) {
-                    // Auto-mode toggle
-                    Button(action: onToggleAutoMode) {
-                        Image(systemName: isAutoMode ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath.circle")
-                            .font(.system(size: 32))
-                            .foregroundColor(isAutoMode ? .green : .white)
-                            .shadow(color: .black.opacity(0.6), radius: 4)
-                    }
-
-                    // Capture button
-                    Button(action: onCapture) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(width: 72, height: 72)
-
-                            Circle()
-                                .fill(isProcessing ? Color.gray : Color.white)
-                                .frame(width: 60, height: 60)
-
-                            if isProcessing {
-                                ProgressView()
-                                    .tint(.black)
-                            }
-                        }
-                    }
-                    .disabled(isProcessing || !isModelReady)
-                }
-                .padding(.trailing, 24)
-                .padding(.bottom, 220) // above the DQ text box
+        VStack(spacing: 0) {
+            if isProcessing {
+                cancelButton
+            } else {
+                captureButton
             }
         }
     }
 
-    // MARK: - Status Bar
+    // MARK: - DQ Capture Button
 
-    private var statusBar: some View {
-        HStack(spacing: 8) {
-            // Model status dot
-            Circle()
-                .fill(isModelReady ? Color.green : Color.orange)
-                .frame(width: 8, height: 8)
+    private var captureButton: some View {
+        Button(action: onCapture) {
+            HStack(spacing: 10) {
+                Text("▶")
+                    .font(.system(size: 18))
+                    .foregroundColor(.white)
+                    .modifier(BlinkModifier())
 
-            if downloadProgress > 0 && downloadProgress < 1 {
-                ProgressView(value: Double(downloadProgress))
-                    .frame(width: 100)
-                    .tint(.white)
+                Text("しらべる")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.white)
             }
-
-            Text(statusMessage)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundColor(.white)
-                .shadow(color: .black.opacity(0.8), radius: 3)
-
-            Spacer()
+            .padding(.horizontal, 36)
+            .padding(.vertical, 14)
+            .background(Color.black.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.white, lineWidth: 3)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.white.opacity(0.4), lineWidth: 1)
+                    .padding(5)
+            )
         }
-        .padding(.horizontal, 20)
+        .opacity(isModelReady ? 1.0 : 0.7)
+    }
+
+    // MARK: - DQ Cancel Button
+
+    private var cancelButton: some View {
+        Button(action: { onCancel?() }) {
+            Text("キャンセル")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(Color(red: 1.0, green: 0.4, blue: 0.4))
+                .padding(.horizontal, 36)
+                .padding(.vertical, 14)
+                .background(Color.black.opacity(0.9))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color(red: 1.0, green: 0.4, blue: 0.4), lineWidth: 3)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Color(red: 1.0, green: 0.4, blue: 0.4).opacity(0.4), lineWidth: 1)
+                        .padding(5)
+                )
+        }
+    }
+}
+
+// MARK: - Blink Modifier
+
+private struct BlinkModifier: ViewModifier {
+    @State private var visible = true
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(visible ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true)) {
+                    visible = false
+                }
+            }
     }
 }

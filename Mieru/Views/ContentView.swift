@@ -14,11 +14,15 @@ struct ContentView: View {
 
     @State private var descriptionText = ""
     @State private var isThinking = false
+    @State private var isTyping = false
     @State private var isAutoMode = false
     @State private var autoTimer: Timer?
 
     /// Tracks the generation to discard stale results.
     @State private var generation = 0
+
+    /// Whether to show cancel (thinking OR typing)
+    private var showCancel: Bool { isThinking || isTyping }
 
     var body: some View {
         ZStack {
@@ -26,36 +30,65 @@ struct ContentView: View {
             CameraPreviewView(session: cameraManager.session)
                 .ignoresSafeArea()
 
-            // Layer 2: DQ Text Box
-            DQTextBoxView(
-                text: descriptionText,
-                isThinking: isThinking
-            )
+            // Layer 2: Status bar at top
+            VStack {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(vlmService.isReady ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
+                    if vlmService.downloadProgress > 0 && vlmService.downloadProgress < 1 {
+                        ProgressView(value: Double(vlmService.downloadProgress))
+                            .frame(width: 100)
+                            .tint(.white)
+                    }
+                    Text(vlmService.statusMessage)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.8), radius: 3)
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 60)
+                Spacer()
+            }
 
             // Layer 3: Siri-style edge glow while thinking
             SiriEdgeGlow(isActive: isThinking)
 
-            // Layer 4: Controls
-            ControlsOverlay(
-                isModelReady: vlmService.isReady,
-                isProcessing: vlmService.running,
-                isAutoMode: isAutoMode,
-                statusMessage: vlmService.statusMessage,
-                downloadProgress: vlmService.downloadProgress,
-                onCapture: { captureAndDescribe() },
-                onToggleAutoMode: { toggleAutoMode() }
-            )
+            // Layer 4: Text box + button stacked vertically at bottom
+            VStack(spacing: 12) {
+                Spacer()
+
+                // DQ Text Box
+                DQTextBoxView(
+                    text: descriptionText,
+                    isThinking: isThinking,
+                    isTyping: $isTyping
+                )
+
+                // DQ Button — しらべる or キャンセル
+                ControlsOverlay(
+                    isModelReady: vlmService.isReady,
+                    isProcessing: showCancel,
+                    isAutoMode: isAutoMode,
+                    statusMessage: vlmService.statusMessage,
+                    downloadProgress: vlmService.downloadProgress,
+                    onCapture: { captureAndDescribe() },
+                    onCancel: { cancelDescribe() },
+                    onToggleAutoMode: { toggleAutoMode() }
+                )
+            }
+            .padding(.bottom, 32)
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             cameraManager.setup()
             cameraManager.start()
-            Task { await vlmService.load() }
         }
         .onChange(of: isAutoMode) { _, auto in
             if auto { startAutoMode() } else { stopAutoMode() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) {_ in
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             handleBackground()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -67,22 +100,35 @@ struct ContentView: View {
     // MARK: - Capture & Describe
 
     private func captureAndDescribe() {
-        guard vlmService.isReady, let frame = cameraManager.latestFrame else { return }
+        guard let frame = cameraManager.latestFrame else { return }
+
+        // Load model on first use if needed
+        guard vlmService.isReady else {
+            Task { await vlmService.load() }
+            return
+        }
 
         generation += 1
         let currentGen = generation
         isThinking = true
+        isTyping = false
         descriptionText = ""
 
         Task {
             let result = await vlmService.describe(pixelBuffer: frame)
 
-            // Discard if a newer request was fired
             guard currentGen == generation else { return }
 
             isThinking = false
             descriptionText = result
         }
+    }
+
+    private func cancelDescribe() {
+        generation += 1
+        isThinking = false
+        isTyping = false
+        descriptionText = ""
     }
 
     // MARK: - Auto Mode
@@ -92,14 +138,9 @@ struct ContentView: View {
     }
 
     private func startAutoMode() {
-        // Immediately capture once
         captureAndDescribe()
-
-        // Then repeat every 6 seconds (enough for inference to finish)
         autoTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { _ in
-            if vlmService.isReady {
-                captureAndDescribe()
-            }
+            if vlmService.isReady { captureAndDescribe() }
         }
     }
 
@@ -120,7 +161,6 @@ struct ContentView: View {
 
     private func handleForeground() {
         cameraManager.start()
-        Task { await vlmService.load() }
     }
 }
 

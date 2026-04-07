@@ -15,6 +15,9 @@ struct DQTextBoxView: View {
     /// Whether we're waiting for the AI to respond.
     let isThinking: Bool
 
+    /// Whether typewriter is still revealing text.
+    @Binding var isTyping: Bool
+
     /// Called when the typewriter finishes revealing all text.
     var onComplete: (() -> Void)?
 
@@ -25,6 +28,7 @@ struct DQTextBoxView: View {
     @State private var cursorVisible = true
     @State private var cursorTimer: Timer?
     @State private var sfx = TypewriterSFX()
+    @State private var slimeFrame = 0
 
     /// Characters per second for the typewriter effect.
     private let charsPerSecond: Double = 20
@@ -32,67 +36,69 @@ struct DQTextBoxView: View {
     // MARK: - Body
 
     var body: some View {
-        VStack {
-            Spacer()
+        if !text.isEmpty || isThinking {
+            ZStack {
+                // DQ double-border box
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.black.opacity(0.88))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.white, lineWidth: 3)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.white.opacity(0.5), lineWidth: 1)
+                            .padding(6)
+                    )
 
-            if !text.isEmpty || isThinking {
-                ZStack {
-                    // DQ double-border box
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.black.opacity(0.88))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(Color.white, lineWidth: 3)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(Color.white.opacity(0.5), lineWidth: 1)
-                                .padding(6)
-                        )
-
-                    // Text content
-                    VStack(alignment: .leading, spacing: 0) {
-                        if isThinking {
-                            thinkingView
-                        } else {
-                            typewriterText
-                        }
+                // Text content
+                VStack(alignment: .leading, spacing: 0) {
+                    if isThinking {
+                        thinkingView
+                    } else {
+                        typewriterText
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 20)
                 }
-                .frame(maxHeight: 180)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.easeOut(duration: 0.3), value: text.isEmpty && !isThinking)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
             }
-        }
-        .onChange(of: text) { _, newText in
-            startTypewriter(for: newText)
+            .frame(maxHeight: 180)
+            .padding(.horizontal, 16)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .animation(.easeOut(duration: 0.3), value: text.isEmpty && !isThinking)
         }
     }
 
     // MARK: - Subviews
 
+    /// Bouncing dots thinking indicator.
     private var thinkingView: some View {
-        HStack(spacing: 4) {
-            Text("Thinking")
-                .font(.system(size: 20, weight: .medium, design: .monospaced))
-                .foregroundColor(.white)
-            ThinkingDots()
+        HStack(spacing: 6) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 8, height: 8)
+                    .offset(y: slimeFrame == i ? -6 : 0)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .onAppear {
+            Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    slimeFrame = (slimeFrame + 1) % 3
+                }
+            }
+        }
     }
 
     private var typewriterText: some View {
         HStack(alignment: .bottom) {
             Text(String(text.prefix(revealedCount)))
-                .font(.system(size: 20, weight: .medium, design: .monospaced))
+                .font(.system(size: 20, weight: .medium))
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Blinking triangle cursor (DQ style)
+            // Blinking triangle cursor (DQ style) when done
             if revealedCount >= text.count && !text.isEmpty {
                 Triangle()
                     .fill(Color.white)
@@ -106,24 +112,28 @@ struct DQTextBoxView: View {
 
     // MARK: - Typewriter Logic
 
-    private func startTypewriter(for newText: String) {
+    func startTypewriter(for newText: String) {
         stopTypewriter()
-        guard !newText.isEmpty else { return }
+        guard !newText.isEmpty else {
+            isTyping = false
+            return
+        }
 
         revealedCount = 0
+        isTyping = true
         let interval = 1.0 / charsPerSecond
 
         typingTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { timer in
             guard revealedCount < newText.count else {
                 timer.invalidate()
                 typingTimer = nil
+                isTyping = false
                 onComplete?()
                 return
             }
 
             revealedCount += 1
 
-            // Play blip for visible characters (skip spaces)
             let idx = newText.index(newText.startIndex, offsetBy: revealedCount - 1)
             let char = newText[idx]
             if !char.isWhitespace {
@@ -150,24 +160,17 @@ struct DQTextBoxView: View {
     }
 }
 
-// MARK: - Thinking Dots Animation
+// MARK: - Blinking Cursor
 
-private struct ThinkingDots: View {
-    @State private var dotCount = 0
-    @State private var timer: Timer?
-
-    var body: some View {
-        Text(String(repeating: ".", count: dotCount))
-            .font(.system(size: 20, weight: .medium, design: .monospaced))
-            .foregroundColor(.white)
-            .frame(width: 40, alignment: .leading)
+private struct BlinkingCursor: ViewModifier {
+    @State private var visible = true
+    func body(content: Content) -> some View {
+        content
+            .opacity(visible ? 1 : 0)
             .onAppear {
-                timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
-                    dotCount = (dotCount % 3) + 1
+                withAnimation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true)) {
+                    visible = false
                 }
-            }
-            .onDisappear {
-                timer?.invalidate()
             }
     }
 }
@@ -182,15 +185,5 @@ private struct Triangle: Shape {
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
         path.closeSubpath()
         return path
-    }
-}
-
-#Preview {
-    ZStack {
-        Color.gray
-        DQTextBoxView(
-            text: "A vast meadow stretches before the hero. The wind carries the scent of adventure.",
-            isThinking: false
-        )
     }
 }
