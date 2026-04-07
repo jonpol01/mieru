@@ -89,6 +89,11 @@ struct ContentView: View {
             cameraManager.setup()
             cameraManager.start()
         }
+        .onChange(of: cameraManager.isRunning) { _, running in
+            if running {
+                Task { await vlmService.load() }
+            }
+        }
         .onChange(of: isAutoMode) { _, auto in
             if auto { startAutoMode() } else { stopAutoMode() }
         }
@@ -168,6 +173,7 @@ struct ContentView: View {
 
     private func handleForeground() {
         cameraManager.start()
+        // Model reload triggers via onChange(cameraManager.isRunning)
     }
 }
 
