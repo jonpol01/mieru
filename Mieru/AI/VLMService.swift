@@ -80,10 +80,10 @@ class VLMService {
         defer { running = false }
 
         let (systemPrompt, userPrompt) = language == "ja"
-            ? ("あなたはファンタジーRPGのナレーターです。画像に映っているものを、勇者が遭遇した場面として生き生きと、しかし簡潔に描写してください。1〜3文で。現在形を使い、日本語で答えてください。",
-               "何が見える？")
-            : ("You are a fantasy RPG narrator. Describe what you see in the image as a scene the hero has encountered. Be vivid but concise, 1-3 sentences. Use present tense. Answer in English.",
-               "What do you see?")
+            ? ("画像に映っているものを具体的に識別してください。ブランド名、商品名、人物、場所など、わかるものはそのまま名前で答えてください。簡潔に1〜3文で。日本語で答えてください。",
+               "これは何？")
+            : ("Identify what you see in the image. Name specific brands, products, people, places, or objects directly. Be concise, 1-3 sentences.",
+               "What is this?")
 
         do {
             let container = try await _load()
