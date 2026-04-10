@@ -11,6 +11,7 @@ struct ContentView: View {
 
     @State private var cameraManager = CameraManager()
     @State private var vlmService = VLMService()
+    @State private var speechService = SpeechService()
 
     @State private var descriptionText = ""
     @State private var isThinking = false
@@ -18,6 +19,7 @@ struct ContentView: View {
     @State private var isAutoMode = false
     @State private var autoTimer: Timer?
     @State private var language = "ja"
+    @State private var voiceEnabled = false
 
     /// Tracks the generation to discard stale results.
     @State private var generation = 0
@@ -48,6 +50,9 @@ struct ContentView: View {
                         .shadow(color: .black.opacity(0.8), radius: 3)
                     Spacer()
 
+                    // Voice toggle
+                    VoiceToggle(isEnabled: $voiceEnabled)
+
                     // Language toggle
                     LanguageToggle(language: $language)
                 }
@@ -67,12 +72,14 @@ struct ContentView: View {
                 DQTextBoxView(
                     text: descriptionText,
                     isThinking: isThinking,
-                    isTyping: $isTyping
+                    isTyping: $isTyping,
+                    voiceMode: voiceEnabled
                 )
 
                 // DQ Button — しらべる or キャンセル
                 ControlsOverlay(
                     isModelReady: vlmService.isReady,
+                    isModelLoading: vlmService.isDownloading || (vlmService.isLoaded == false && vlmService.statusMessage != ""),
                     isProcessing: showCancel,
                     isAutoMode: isAutoMode,
                     statusMessage: vlmService.statusMessage,
@@ -113,6 +120,7 @@ struct ContentView: View {
 
         // Load model on first use, then auto-capture
         guard vlmService.isReady else {
+            guard !vlmService.isDownloading else { return }
             Task {
                 await vlmService.load()
                 captureAndDescribe()
@@ -133,6 +141,10 @@ struct ContentView: View {
 
             isThinking = false
             descriptionText = result
+
+            if voiceEnabled {
+                speechService.speak(result, language: language)
+            }
         }
     }
 
@@ -141,6 +153,7 @@ struct ContentView: View {
         isThinking = false
         isTyping = false
         descriptionText = ""
+        speechService.stop()
     }
 
     // MARK: - Auto Mode

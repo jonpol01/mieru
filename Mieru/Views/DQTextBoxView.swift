@@ -18,6 +18,9 @@ struct DQTextBoxView: View {
     /// Whether typewriter is still revealing text.
     @Binding var isTyping: Bool
 
+    /// When true, skip blip SFX (voice is playing instead).
+    var voiceMode: Bool = false
+
     /// Called when the typewriter finishes revealing all text.
     var onComplete: (() -> Void)?
 
@@ -164,7 +167,7 @@ struct DQTextBoxView: View {
 
             let idx = newText.index(newText.startIndex, offsetBy: revealedCount - 1)
             let char = newText[idx]
-            if !char.isWhitespace {
+            if !voiceMode && !char.isWhitespace {
                 sfx.playBlip()
             }
         }
