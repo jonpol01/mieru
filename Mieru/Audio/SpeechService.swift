@@ -19,10 +19,17 @@ class SpeechService {
     var isLoading = false
     var statusMessage = ""
 
+    /// Last synthesis perf — for the perf HUD.
+    var lastSynthSeconds: Double = 0
+    var lastAudioSeconds: Double = 0
+    var lastRTF: Double = 0   // realtime factor = audio / synth (higher = faster)
+
     private var model: KokoroTTSModel?
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
-    private var synthesisTask: Task<Void, Never>?
+
+    /// Monotonic token — bumped on every speak()/stop(); stale work bails.
+    private var playToken = 0
 
     private let sampleRate: Double = 24000
 
@@ -73,10 +80,13 @@ class SpeechService {
         }
     }
 
-    func speak(_ text: String, language: String = "ja") {
+    /// Synthesize, then start playback. **Returns the instant audio begins** (or on
+    /// failure) — so the caller can reveal the on-screen text in sync with the voice.
+    func speak(_ text: String, language: String = "ja") async {
         guard isEnabled, !text.isEmpty, let model else { return }
 
         stop()
+        let myToken = playToken
         isSpeaking = true
 
         let voice = language == "ja"
@@ -85,42 +95,38 @@ class SpeechService {
         let lang = language == "ja" ? "ja" : "en"
         let capturedModel = model
 
-        synthesisTask = Task.detached {
-            do {
-                // Only speak complete sentences — drop trailing incomplete text
-                let cleanText = trimToCompleteSentences(text)
-                guard !cleanText.isEmpty else {
-                    await MainActor.run { self.isSpeaking = false }
-                    return
-                }
+        let cleanText = trimToCompleteSentences(text)
+        guard !cleanText.isEmpty else { isSpeaking = false; return }
 
+        do {
+            let t0 = CFAbsoluteTimeGetCurrent()
+            let samples: [Float] = try await Task.detached {
                 let sentences = splitForKokoro(cleanText)
-                var allSamples = [Float]()
-
+                var all = [Float]()
                 for sentence in sentences {
-                    if Task.isCancelled { return }
                     let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { continue }
-
-                    let samples = try capturedModel.synthesize(
+                    let smp = try capturedModel.synthesize(
                         text: trimmed, voice: voice, language: lang, speed: 1.0)
-                    allSamples.append(contentsOf: samples)
+                    all.append(contentsOf: smp)
                 }
+                return all
+            }.value
+            let synth = CFAbsoluteTimeGetCurrent() - t0
+            lastSynthSeconds = synth
+            lastAudioSeconds = Double(samples.count) / sampleRate
+            lastRTF = synth > 0 ? lastAudioSeconds / synth : 0
 
-                if Task.isCancelled { return }
-
-                // Play the full audio as one smooth buffer
-                await self.playAudio(samples: allSamples)
-            } catch {
-                NSLog("[TTS] Synthesis error: %@", error.localizedDescription)
-                await MainActor.run { self.isSpeaking = false }
-            }
+            guard myToken == playToken else { return }   // cancelled mid-synth
+            playAudio(samples: samples, token: myToken)
+        } catch {
+            NSLog("[TTS] Synthesis error: %@", error.localizedDescription)
+            if myToken == playToken { isSpeaking = false }
         }
     }
 
     func stop() {
-        synthesisTask?.cancel()
-        synthesisTask = nil
+        playToken &+= 1
         playerNode?.stop()
         if let engine = audioEngine, engine.isRunning {
             engine.stop()
@@ -130,11 +136,14 @@ class SpeechService {
         isSpeaking = false
     }
 
-    private func playAudio(samples: [Float]) {
-        guard !samples.isEmpty else {
-            isSpeaking = false
-            return
-        }
+    private func playAudio(samples: [Float], token: Int) {
+        guard token == playToken else { return }
+        guard !samples.isEmpty else { isSpeaking = false; return }
+
+        playerNode?.stop()
+        audioEngine?.stop()
+        audioEngine = nil
+        playerNode = nil
 
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -166,7 +175,8 @@ class SpeechService {
 
             player.scheduleBuffer(buffer) { [weak self] in
                 Task { @MainActor in
-                    self?.isSpeaking = false
+                    guard let self, token == self.playToken else { return }
+                    self.isSpeaking = false
                 }
             }
             player.play()

@@ -22,18 +22,25 @@ struct ContentView: View {
 
     @State private var descriptionText = ""
     @State private var isThinking = false
+    @State private var isSynthesizing = false   // voice being prepared (after text ready)
     @State private var isTyping = false
     @State private var isAutoMode = false
     @State private var autoTimer: Timer?
     @State private var language = "ja"
     @State private var voiceEnabled = false
     @State private var showModels = false
+    @AppStorage("showPerfStats") private var showPerfStats = false
+
+    /// Idle power-saving: unload models after inactivity so the GPU/ANE go cold.
+    @State private var idleTimer: Timer?
+    @State private var isIdle = false
+    private let idleTimeout: TimeInterval = 120   // 2 min of no captures → unload
 
     /// Tracks the generation to discard stale results.
     @State private var generation = 0
 
-    /// Whether to show cancel (thinking OR typing)
-    private var showCancel: Bool { isThinking || isTyping }
+    /// Whether to show cancel (thinking, synthesizing voice, OR typing)
+    private var showCancel: Bool { isThinking || isSynthesizing || isTyping }
 
     var body: some View {
         ZStack {
@@ -45,14 +52,14 @@ struct ContentView: View {
             VStack {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(vlmService.isReady ? Color.green : Color.orange)
+                        .fill(isIdle ? Color.gray : (vlmService.isReady ? Color.green : Color.orange))
                         .frame(width: 8, height: 8)
                     if vlmService.downloadProgress > 0 && vlmService.downloadProgress < 1 {
                         ProgressView(value: Double(vlmService.downloadProgress))
                             .frame(width: 100)
                             .tint(.white)
                     }
-                    Text(vlmService.statusMessage)
+                    Text(isIdle ? "省電力 — タップで再開" : vlmService.statusMessage)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .foregroundColor(.white)
                         .shadow(color: .black.opacity(0.8), radius: 3)
@@ -80,6 +87,13 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 60)
+
+                if showPerfStats {
+                    perfHUD
+                        .padding(.horizontal, 20)
+                        .padding(.top, 6)
+                }
+
                 Spacer()
             }
 
@@ -94,6 +108,7 @@ struct ContentView: View {
                 DQTextBoxView(
                     text: descriptionText,
                     isThinking: isThinking,
+                    isSynthesizing: isSynthesizing,
                     isTyping: $isTyping,
                     voiceMode: voiceEnabled
                 )
@@ -126,6 +141,7 @@ struct ContentView: View {
                     await vlmService.load()
                     await loadActiveTTS()
                     await catalog.scanCache()
+                    resetIdleTimer()
                 }
             }
         }
@@ -154,6 +170,52 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Perf HUD
+
+    private var perfHUD: some View {
+        HStack(spacing: 8) {
+            perfPill(
+                icon: "eye.fill",
+                label: "VLM",
+                value: vlmService.lastTokensPerSecond > 0
+                    ? String(format: "%.1f tok/s", vlmService.lastTokensPerSecond)
+                    : "—"
+            )
+            perfPill(
+                icon: "speaker.wave.2.fill",
+                label: "Voice",
+                value: voiceRTF > 0
+                    ? String(format: "%.2fx RT", voiceRTF)
+                    : "—"
+            )
+            Spacer()
+        }
+    }
+
+    private var voiceRTF: Double {
+        isIrodoriActive ? irodoriService.lastRTF : speechService.lastRTF
+    }
+
+    private func perfPill(icon: String, label: String, value: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundColor(.green)
+            Text(label)
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundColor(.white.opacity(0.6))
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.black.opacity(0.6))
+        .clipShape(Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+        .shadow(color: .black.opacity(0.6), radius: 3)
+    }
+
     // MARK: - TTS Engine Dispatch
 
     /// Load only the active TTS engine (one resident at a time to save memory).
@@ -165,11 +227,12 @@ struct ContentView: View {
         }
     }
 
-    private func ttsSpeak(_ text: String) {
+    /// Synthesize + start playback on the active engine. Returns when audio begins.
+    private func ttsSpeak(_ text: String) async {
         if isIrodoriActive {
-            irodoriService.speak(text, language: language)
+            await irodoriService.speak(text, language: language)
         } else {
-            speechService.speak(text, language: language)
+            await speechService.speak(text, language: language)
         }
     }
 
@@ -182,7 +245,12 @@ struct ContentView: View {
     // MARK: - Model Activation
 
     private func activateVLM(modelId: String) async {
+        // Free TTS weights before loading the (possibly large, e.g. QAT ~4.4 GB) VLM,
+        // so the load peak doesn't collide with a resident TTS model → Jetsam.
         ttsStop()
+        speechService.unload()
+        irodoriService.unload()
+
         let success = await vlmService.switchModel(to: modelId)
 
         if success {
@@ -196,6 +264,9 @@ struct ContentView: View {
                 catalog.setActiveVLM(restored)
             }
         }
+
+        // Reload the active TTS engine now that the VLM is resident.
+        await loadActiveTTS()
         await catalog.scanCache()
     }
 
@@ -221,21 +292,26 @@ struct ContentView: View {
     private func captureAndDescribe() {
         guard let frame = cameraManager.latestFrame else { return }
 
-        // Load model on first use, then auto-capture
+        // Load model on first use (or wake from idle unload), then auto-capture.
         guard vlmService.isReady else {
             guard !vlmService.isDownloading else { return }
             Task {
+                isIdle = false
                 await vlmService.load()
+                await loadActiveTTS()   // idle may have unloaded the voice too
                 captureAndDescribe()
             }
             return
         }
 
         ttsStop()
+        isIdle = false
+        idleTimer?.invalidate()   // pause idle countdown during active work
 
         generation += 1
         let currentGen = generation
         isThinking = true
+        isSynthesizing = false
         isTyping = false
         descriptionText = ""
 
@@ -243,30 +319,69 @@ struct ContentView: View {
             let result = await vlmService.describe(pixelBuffer: frame, language: language)
 
             guard currentGen == generation else { return }
-
             isThinking = false
-            descriptionText = result
 
             if voiceEnabled {
+                // Sync text with voice: show a "preparing voice" state, synthesize, and
+                // reveal the text (typewriter) only once audio actually starts.
+                //
                 // Irodori is a heavy MLX model (~1.3 GB) whose flow-matching synthesis
-                // spikes memory. Keeping Gemma (~1.5 GB) resident through that spike
-                // (plus the camera) overflows the budget → Jetsam. The description text
-                // is already produced, so free the brain before synthesizing; the next
-                // しらべる lazily reloads it. Kokoro (CoreML/ANE) is light — leave Gemma in.
+                // spikes memory; keeping Gemma (~1.5 GB) resident through that spike
+                // (plus the camera) overflows the budget → Jetsam. The text is already
+                // produced, so free the brain before synthesizing; the next しらべる
+                // lazily reloads it. Kokoro (CoreML/ANE) is light — leave Gemma in.
                 if isIrodoriActive {
                     vlmService.unload()
                 }
-                ttsSpeak(result)
+                isSynthesizing = true
+                await ttsSpeak(result)            // returns when audio starts (or fails)
+                guard currentGen == generation else { return }
+                isSynthesizing = false
+                descriptionText = result          // typewriter + voice in sync
+            } else {
+                descriptionText = result          // no voice → reveal immediately
             }
+
+            // Work done — start the idle countdown.
+            resetIdleTimer()
         }
     }
 
     private func cancelDescribe() {
         generation += 1
         isThinking = false
+        isSynthesizing = false
         isTyping = false
         descriptionText = ""
         ttsStop()
+        resetIdleTimer()
+    }
+
+    // MARK: - Idle Power Saving
+
+    /// (Re)start the inactivity countdown. After `idleTimeout` with no captures,
+    /// unload the models so the GPU/ANE go cold (battery + heat).
+    private func resetIdleTimer() {
+        idleTimer?.invalidate()
+        idleTimer = Timer.scheduledTimer(withTimeInterval: idleTimeout, repeats: false) { _ in
+            Task { @MainActor in idleUnload() }
+        }
+    }
+
+    private func idleUnload() {
+        // Never unload mid-activity — reschedule and try later.
+        guard !isThinking, !isSynthesizing, !isTyping,
+              !speechService.isSpeaking, !irodoriService.isSpeaking else {
+            resetIdleTimer()
+            return
+        }
+        guard vlmService.isLoaded || speechService.isLoaded || irodoriService.isLoaded else { return }
+
+        vlmService.unload()
+        speechService.unload()
+        irodoriService.unload()
+        isIdle = true
+        VLMService.log("idle unload — models released after \(Int(idleTimeout))s")
     }
 
     // MARK: - Auto Mode
@@ -291,6 +406,7 @@ struct ContentView: View {
 
     private func handleBackground() {
         UIApplication.shared.isIdleTimerDisabled = false
+        idleTimer?.invalidate()
         stopAutoMode()
         isAutoMode = false
         cameraManager.stop()

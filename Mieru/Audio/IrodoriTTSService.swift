@@ -24,6 +24,11 @@ class IrodoriTTSService {
     var isLoading = false
     var statusMessage = ""
 
+    /// Last synthesis perf — for the perf HUD.
+    var lastSynthSeconds: Double = 0
+    var lastAudioSeconds: Double = 0
+    var lastRTF: Double = 0   // realtime factor = audio / synth (higher = faster)
+
     /// VoiceDesign captions surfaced in the voice picker. The selected caption is
     /// passed straight through as the `voice` parameter to the model.
     static let voices: [String] = [
@@ -47,7 +52,6 @@ class IrodoriTTSService {
     private var model: SpeechGenerationModel?
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
-    private var generateTask: Task<Void, Never>?
 
     /// Discovered from the loaded model (Irodori is 48 kHz).
     private var sampleRate: Double = 48000
@@ -100,7 +104,9 @@ class IrodoriTTSService {
 
     // MARK: - Speak
 
-    func speak(_ text: String, language: String = "ja") {
+    /// Synthesize, then start playback. **Returns the instant audio begins** (or on
+    /// failure) — so the caller can reveal the on-screen text in sync with the voice.
+    func speak(_ text: String, language: String = "ja") async {
         guard isEnabled, !text.isEmpty, let model else { return }
 
         stop()
@@ -114,31 +120,31 @@ class IrodoriTTSService {
         // VoiceDesign caption. Default to the first preset so it matches the picker top.
         let voice = selectedVoice ?? Self.voices.first
         let capturedModel = model
+        MLX.GPU.clearCache()
+        Self.log("synth start len=\(cleanText.count) voice=\(voice ?? "nil") — active=\(Self.activeMB)MB")
 
-        generateTask = Task.detached {
-            do {
-                if await self.isStale(myToken) { return }
-                await MainActor.run { MLX.GPU.clearCache() }
-
-                Self.log("synth start len=\(cleanText.count) voice=\(voice ?? "nil") — active=\(Self.activeMB)MB")
-                // Whole-utterance generate (flow-matching — no per-sentence chunking).
+        do {
+            // Whole-utterance generate (flow-matching) on a background task.
+            let t0 = CFAbsoluteTimeGetCurrent()
+            let samples: [Float] = try await Task.detached {
                 let audio = try await capturedModel.generate(
                     text: cleanText, voice: voice, refAudio: nil, refText: nil, language: nil)
-                let samples = audio.asArray(Float.self)
-                Self.log("synth OK \(samples.count) samples — active=\(Self.activeMB)MB peak=\(Self.peakMB)MB")
-                NSLog("[Irodori] Generated %d samples", samples.count)
+                return audio.asArray(Float.self)
+            }.value
+            let synth = CFAbsoluteTimeGetCurrent() - t0
+            lastSynthSeconds = synth
+            lastAudioSeconds = Double(samples.count) / sampleRate
+            lastRTF = synth > 0 ? lastAudioSeconds / synth : 0
+            Self.log("synth OK \(samples.count) samples in \(String(format: "%.1f", synth))s (RTF \(String(format: "%.2f", lastRTF))) — active=\(Self.activeMB)MB peak=\(Self.peakMB)MB")
 
-                if await self.isStale(myToken) { return }
-                await self.playAudio(samples: samples, token: myToken)
-            } catch {
-                Self.log("synth ERROR: \(String(describing: error))")
-                NSLog("[Irodori] Synthesis error: %@", String(describing: error))
-                await MainActor.run { self.finishIfCurrent(myToken) }
-            }
+            guard myToken == playToken else { return }   // cancelled mid-synth
+            playAudio(samples: samples, token: myToken)   // starts playback, returns immediately
+        } catch {
+            Self.log("synth ERROR: \(String(describing: error))")
+            NSLog("[Irodori] Synthesis error: %@", String(describing: error))
+            if myToken == playToken { isSpeaking = false }
         }
     }
-
-    private func isStale(_ token: Int) -> Bool { token != playToken }
 
     private func finishIfCurrent(_ token: Int) {
         guard token == playToken else { return }
@@ -148,9 +154,7 @@ class IrodoriTTSService {
     // MARK: - Stop
 
     func stop() {
-        playToken &+= 1
-        generateTask?.cancel()
-        generateTask = nil
+        playToken &+= 1   // any in-flight synth bails when it sees a changed token
         playerNode?.stop()
         if let engine = audioEngine, engine.isRunning { engine.stop() }
         audioEngine = nil

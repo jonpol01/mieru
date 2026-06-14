@@ -22,6 +22,7 @@ struct ModelsView: View {
     @State private var catalog = ModelCatalog.shared
     @State private var selectedModel: ModelInfo?
     @State private var showAddModel = false
+    @AppStorage("showPerfStats") private var showPerfStats = false
 
     private var vlmModels: [ModelInfo] {
         catalog.models.filter { $0.kind == .vlm }
@@ -41,6 +42,7 @@ struct ModelsView: View {
                         visionSection
                         voiceSection
                         storageSection
+                        settingsSection
                         Spacer(minLength: 40)
                     }
                     .padding(.horizontal, 16)
@@ -160,6 +162,34 @@ struct ModelsView: View {
                     )
                 }
             }
+            .padding(14)
+            .background(Color.white.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    // MARK: - Settings Section
+
+    private var settingsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader(
+                title: "Settings",
+                subtitle: nil,
+                icon: "gearshape.fill",
+                color: .gray
+            )
+
+            Toggle(isOn: $showPerfStats) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show performance")
+                        .foregroundColor(.white)
+                        .font(.system(size: 15, weight: .medium))
+                    Text("Live tokens/s (VLM) and realtime factor (voice)")
+                        .foregroundColor(.gray)
+                        .font(.system(size: 12))
+                }
+            }
+            .tint(.green)
             .padding(14)
             .background(Color.white.opacity(0.04))
             .clipShape(RoundedRectangle(cornerRadius: 14))

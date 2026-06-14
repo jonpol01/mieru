@@ -32,6 +32,10 @@ class VLMService {
     /// The currently loaded/loading model ID.
     public var currentModelId: String = "mlx-community/gemma-4-e2b-it-4bit"
 
+    /// Last generation throughput (tokens/sec) and token count — for the perf HUD.
+    public var lastTokensPerSecond: Double = 0
+    public var lastTokenCount: Int = 0
+
     private let generateParameters = GenerateParameters(temperature: 0.6)
     private let maxTokens = 150
 
@@ -179,6 +183,8 @@ class VLMService {
             }
 
             self.output = result.output
+            self.lastTokensPerSecond = result.tokensPerSecond
+            self.lastTokenCount = result.tokenIds.count
             return result.output
         } catch {
             let msg = "VLM error: \(error.localizedDescription)"
