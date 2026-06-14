@@ -16,9 +16,15 @@
 		AA000007 /* VLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100007 /* VLMService.swift */; };
 		AA000008 /* TypewriterSFX.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100008 /* TypewriterSFX.swift */; };
 		AA000013 /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100014 /* SpeechService.swift */; };
+		AA000029 /* IrodoriTTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100021 /* IrodoriTTSService.swift */; };
 		AA000010 /* SiriEdgeGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100011 /* SiriEdgeGlow.swift */; };
 		AA000012 /* LanguageToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100013 /* LanguageToggle.swift */; };
 		AA000014 /* VoiceToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100015 /* VoiceToggle.swift */; };
+		AA000015 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100016 /* ModelsView.swift */; };
+		AA000016 /* ModelInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100017 /* ModelInfo.swift */; };
+		AA000017 /* ModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100018 /* ModelCatalog.swift */; };
+		AA000018 /* ModelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100019 /* ModelDetailView.swift */; };
+		AA000019 /* AddModelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100020 /* AddModelView.swift */; };
 		AA000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA100009 /* Assets.xcassets */; };
 		AA000020 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = AA300001 /* MLX */; };
 		AA000021 /* MLXRandom in Frameworks */ = {isa = PBXBuildFile; productRef = AA300002 /* MLXRandom */; };
@@ -26,6 +32,9 @@
 		AA000023 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = AA300004 /* MLXVLM */; };
 		AA000024 /* HuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = AA300005 /* HuggingFace */; };
 		AA000025 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = AA300006 /* Tokenizers */; };
+		AA000026 /* KokoroTTS in Frameworks */ = {isa = PBXBuildFile; productRef = AA300007 /* KokoroTTS */; };
+		AA000027 /* MLXHuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = AA300008 /* MLXHuggingFace */; };
+		AA000028 /* MLXAudioTTS in Frameworks */ = {isa = PBXBuildFile; productRef = AA300009 /* MLXAudioTTS */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,11 +47,17 @@
 		AA100007 /* VLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLMService.swift; sourceTree = "<group>"; };
 		AA100008 /* TypewriterSFX.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterSFX.swift; sourceTree = "<group>"; };
 		AA100014 /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
+		AA100021 /* IrodoriTTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IrodoriTTSService.swift; sourceTree = "<group>"; };
 		AA100009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA100010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA100011 /* SiriEdgeGlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriEdgeGlow.swift; sourceTree = "<group>"; };
 		AA100013 /* LanguageToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageToggle.swift; sourceTree = "<group>"; };
 		AA100015 /* VoiceToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceToggle.swift; sourceTree = "<group>"; };
+		AA100016 /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
+		AA100017 /* ModelInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInfo.swift; sourceTree = "<group>"; };
+		AA100018 /* ModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCatalog.swift; sourceTree = "<group>"; };
+		AA100019 /* ModelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDetailView.swift; sourceTree = "<group>"; };
+		AA100020 /* AddModelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddModelView.swift; sourceTree = "<group>"; };
 		AA100099 /* Mieru.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mieru.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -57,6 +72,9 @@
 				AA000023 /* MLXVLM in Frameworks */,
 				AA000024 /* HuggingFace in Frameworks */,
 				AA000025 /* Tokenizers in Frameworks */,
+				AA000026 /* KokoroTTS in Frameworks */,
+				AA000027 /* MLXHuggingFace in Frameworks */,
+				AA000028 /* MLXAudioTTS in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,8 +97,26 @@
 				AA200004 /* AI */,
 				AA200005 /* Views */,
 				AA200006 /* Audio */,
+				AA200007 /* Models */,
+				AA200008 /* Core */,
 			);
 			path = Mieru;
+			sourceTree = "<group>";
+		};
+		AA200007 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				AA100017 /* ModelInfo.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		AA200008 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				AA100018 /* ModelCatalog.swift */,
+			);
+			path = Core;
 			sourceTree = "<group>";
 		};
 		AA200002 /* App */ = {
@@ -119,6 +155,9 @@
 				AA100011 /* SiriEdgeGlow.swift */,
 				AA100013 /* LanguageToggle.swift */,
 				AA100015 /* VoiceToggle.swift */,
+				AA100016 /* ModelsView.swift */,
+				AA100019 /* ModelDetailView.swift */,
+				AA100020 /* AddModelView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -128,6 +167,7 @@
 			children = (
 				AA100008 /* TypewriterSFX.swift */,
 				AA100014 /* SpeechService.swift */,
+				AA100021 /* IrodoriTTSService.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -163,6 +203,9 @@
 				AA300004 /* MLXVLM */,
 				AA300005 /* HuggingFace */,
 				AA300006 /* Tokenizers */,
+				AA300007 /* KokoroTTS */,
+				AA300008 /* MLXHuggingFace */,
+				AA300009 /* MLXAudioTTS */,
 			);
 			productName = Mieru;
 			productReference = AA100099 /* Mieru.app */;
@@ -197,6 +240,8 @@
 				AAB00002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				AAB00003 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 				AAB00004 /* XCRemoteSwiftPackageReference "swift-huggingface" */,
+				AAB00005 /* XCRemoteSwiftPackageReference "speech-swift" */,
+				AAB00006 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */,
 			);
 			productRefGroup = AA200099 /* Products */;
 			projectDirPath = "";
@@ -232,9 +277,15 @@
 				AA000007 /* VLMService.swift in Sources */,
 				AA000008 /* TypewriterSFX.swift in Sources */,
 				AA000013 /* SpeechService.swift in Sources */,
+				AA000029 /* IrodoriTTSService.swift in Sources */,
 				AA000010 /* SiriEdgeGlow.swift in Sources */,
 				AA000012 /* LanguageToggle.swift in Sources */,
 				AA000014 /* VoiceToggle.swift in Sources */,
+				AA000015 /* ModelsView.swift in Sources */,
+				AA000016 /* ModelInfo.swift in Sources */,
+				AA000017 /* ModelCatalog.swift in Sources */,
+				AA000018 /* ModelDetailView.swift in Sources */,
+				AA000019 /* AddModelView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -257,7 +308,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -290,7 +341,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -359,7 +410,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -416,7 +467,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
@@ -454,15 +505,15 @@
 			repositoryURL = "https://github.com/ml-explore/mlx-swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.30.6;
+				minimumVersion = 0.31.4;
 			};
 		};
 		AAB00002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/adrgrondin/mlx-swift-lm";
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
 			requirement = {
-				branch = "port/gemma-4-model";
-				kind = branch;
+				kind = revision;
+				revision = a47894a1e7e963b24bd48c030f5fc1d1627e60e9;
 			};
 		};
 		AAB00003 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
@@ -479,6 +530,22 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 0.9.0;
+			};
+		};
+		AAB00005 /* XCRemoteSwiftPackageReference "speech-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/soniqo/speech-swift";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		AAB00006 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jonpol01/mlx-audio-swift";
+			requirement = {
+				branch = "irodori-tts";
+				kind = branch;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -513,6 +580,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AAB00003 /* XCRemoteSwiftPackageReference "swift-transformers" */;
 			productName = Tokenizers;
+		};
+		AA300007 /* KokoroTTS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AAB00005 /* XCRemoteSwiftPackageReference "speech-swift" */;
+			productName = KokoroTTS;
+		};
+		AA300008 /* MLXHuggingFace */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AAB00002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = MLXHuggingFace;
+		};
+		AA300009 /* MLXAudioTTS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AAB00006 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */;
+			productName = MLXAudioTTS;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
