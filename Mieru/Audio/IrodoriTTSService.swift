@@ -136,6 +136,9 @@ class IrodoriTTSService {
             lastAudioSeconds = Double(samples.count) / sampleRate
             lastRTF = synth > 0 ? lastAudioSeconds / synth : 0
             Self.log("synth OK \(samples.count) samples in \(String(format: "%.1f", synth))s (RTF \(String(format: "%.2f", lastRTF))) — active=\(Self.activeMB)MB peak=\(Self.peakMB)MB")
+            #if DEBUG
+            Self.debugDumpWAV(samples: samples, rate: sampleRate, tag: "irodori")
+            #endif
 
             guard myToken == playToken else { return }   // cancelled mid-synth
             playAudio(samples: samples, token: myToken)   // starts playback, returns immediately
@@ -203,6 +206,7 @@ class IrodoriTTSService {
                 Task { @MainActor in self?.finishPlayback(token: token) }
             }
             player.play()
+            Self.log("playback started \(String(format: "%.1f", Double(samples.count) / sampleRate))s audio")
         } catch {
             NSLog("[Irodori] Playback error: %@", error.localizedDescription)
             finishIfCurrent(token)
@@ -230,6 +234,9 @@ extension IrodoriTTSService {
     /// File-based log (device console is flaky). Pull via:
     /// xcrun devicectl device copy from … Documents/irodori.log
     nonisolated static func log(_ line: String) {
+        NSLog("[Irodori] %@", line)
+        #if DEBUG
+        // File log only in Debug: it never truncates and Documents is iCloud-backed.
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let url = docs.appendingPathComponent("irodori.log")
         let entry = "[\(ISO8601DateFormatter().string(from: Date()))] \(line)\n"
@@ -238,9 +245,34 @@ extension IrodoriTTSService {
         } else {
             try? entry.data(using: .utf8)?.write(to: url)
         }
-        NSLog("[Irodori] %@", line)
+        #endif
     }
 }
+
+#if DEBUG
+extension IrodoriTTSService {
+    /// Writes synthesized audio to Documents/tts_dumps/<tag>_<time>.wav (16-bit PCM mono)
+    /// so a remote test can pull it off the device and check it isn't silent or truncated.
+    nonisolated static func debugDumpWAV(samples: [Float], rate: Double, tag: String) {
+        guard !samples.isEmpty,
+              let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return }
+        let dir = docs.appendingPathComponent("tts_dumps", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let pcm = samples.map { Int16(max(-1, min(1, $0)) * Float(Int16.max)) }
+        let sr = UInt32(rate)
+        var data = Data()
+        func le<T: FixedWidthInteger>(_ v: T) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
+        data.append(contentsOf: "RIFF".utf8); le(UInt32(36 + pcm.count * 2)); data.append(contentsOf: "WAVE".utf8)
+        data.append(contentsOf: "fmt ".utf8); le(UInt32(16)); le(UInt16(1)); le(UInt16(1))
+        le(sr); le(sr * 2); le(UInt16(2)); le(UInt16(16))
+        data.append(contentsOf: "data".utf8); le(UInt32(pcm.count * 2))
+        pcm.forEach { le($0) }
+        try? data.write(to: dir.appendingPathComponent("\(tag)_\(Int(Date().timeIntervalSince1970)).wav"))
+    }
+}
+#endif
 
 // MARK: - Text Processing
 

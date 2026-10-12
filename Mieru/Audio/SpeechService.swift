@@ -120,6 +120,10 @@ class SpeechService {
             lastSynthSeconds = synth
             lastAudioSeconds = Double(samples.count) / sampleRate
             lastRTF = synth > 0 ? lastAudioSeconds / synth : 0
+            VLMService.log("kokoro synth OK \(samples.count) samples in \(String(format: "%.2f", synth))s (RTF \(String(format: "%.2f", lastRTF))) voice=\(voice)")
+            #if DEBUG
+            IrodoriTTSService.debugDumpWAV(samples: samples, rate: sampleRate, tag: "kokoro")
+            #endif
 
             guard myToken == playToken else { return }   // cancelled mid-synth
             playAudio(samples: samples, token: myToken)
@@ -184,6 +188,7 @@ class SpeechService {
                 }
             }
             player.play()
+            VLMService.log("kokoro playback started \(String(format: "%.1f", Double(samples.count) / sampleRate))s audio")
 
             self.audioEngine = engine
             self.playerNode = player

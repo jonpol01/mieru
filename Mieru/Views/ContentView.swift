@@ -143,12 +143,7 @@ struct ContentView: View {
                     await catalog.scanCache()
                     resetIdleTimer()
                     #if DEBUG
-                    // Remote device testing: `devicectl … process launch John-Soliva.Mieru -autoCapture`
-                    // fires one しらべる once the model is ready (no screen taps needed).
-                    if ProcessInfo.processInfo.arguments.contains("-autoCapture") {
-                        try? await Task.sleep(for: .seconds(3))
-                        captureAndDescribe()
-                    }
+                    await runDebugLaunchArguments()
                     #endif
                 }
             }
@@ -364,6 +359,62 @@ struct ContentView: View {
         ttsStop()
         resetIdleTimer()
     }
+
+    // MARK: - Debug Launch Arguments
+
+    #if DEBUG
+    /// Remote device testing without screen taps. App arguments go after `--`:
+    /// `devicectl … process launch John-Soliva.Mieru -- -voice irodori -irodoriVoice 2 -autoCapture 3`
+    ///   -lang ja|en           response language
+    ///   -vlm <hf model id>    switch the vision model first (e.g. the QAT repo)
+    ///   -voice kokoro|irodori enable voice with that engine
+    ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
+    ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
+    private func runDebugLaunchArguments() async {
+        let args = ProcessInfo.processInfo.arguments
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count,
+                  !args[i + 1].hasPrefix("-") else { return nil }
+            return args[i + 1]
+        }
+
+        if let lang = value("-lang") { language = lang }
+        if let vlm = value("-vlm") { await activateVLM(modelId: vlm) }
+        if let voice = value("-voice") {
+            await activateTTS(modelId: voice == "irodori" ? irodoriId : "aufklarer/Kokoro-82M-CoreML")
+            voiceEnabled = true
+        }
+        if let v = value("-irodoriVoice"), let i = Int(v), IrodoriTTSService.voices.indices.contains(i) {
+            irodoriService.selectedVoice = IrodoriTTSService.voices[i]
+        }
+        guard args.contains("-autoCapture") else { return }
+
+        let cycles = Int(value("-autoCapture") ?? "") ?? 1
+        VLMService.log("debug: \(cycles) capture cycle(s) lang=\(language) voice=\(voiceEnabled ? (isIrodoriActive ? "irodori" : "kokoro") : "off") vlm=\(vlmService.currentModelId)")
+        for cycle in 1...cycles {
+            try? await Task.sleep(for: .seconds(3))
+            VLMService.log("debug: cycle \(cycle)/\(cycles) start")
+            descriptionText = ""
+            captureAndDescribe()
+            // Done = a new result is on screen and nothing is still thinking, synthesizing,
+            // typing or speaking. (With Irodori, Gemma reloads first — text stays empty then.)
+            // Require two consecutive idle polls so a result that lands just before the
+            // typewriter flips `isTyping` isn't mistaken for a finished cycle.
+            var idlePolls = 0
+            for poll in 0..<480 {
+                try? await Task.sleep(for: .milliseconds(500))
+                let busy = isThinking || isSynthesizing || isTyping || vlmService.isDownloading
+                    || speechService.isSpeaking || irodoriService.isSpeaking
+                idlePolls = (!descriptionText.isEmpty && !busy) ? idlePolls + 1 : 0
+                if idlePolls >= 2 { break }
+                if poll == 40 && descriptionText.isEmpty && !busy {
+                    VLMService.log("debug: cycle \(cycle) produced nothing after 20s (no frame or still loading?)")
+                }
+            }
+        }
+        VLMService.log("debug: capture cycles done")
+    }
+    #endif
 
     // MARK: - Idle Power Saving
 

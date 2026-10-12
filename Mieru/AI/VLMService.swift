@@ -14,6 +14,7 @@ import MLXHuggingFace
 import MLXLMCommon
 import MLXRandom
 import MLXVLM
+import os
 import Tokenizers
 
 @Observable
@@ -199,7 +200,14 @@ class VLMService {
             }
 
             self.output = text
+            // The description reflects whatever the camera saw — keep its text out of
+            // persistent logs in release builds.
+            #if DEBUG
             Self.log("describe OK \(lastTokenCount) tok @ \(String(format: "%.1f", lastTokensPerSecond)) tok/s: \(text.prefix(120))")
+            Self.debugAppendDescription(text, language: language, modelId: currentModelId)
+            #else
+            Self.log("describe OK \(lastTokenCount) tok @ \(String(format: "%.1f", lastTokensPerSecond)) tok/s")
+            #endif
             return text
         } catch {
             let msg = "VLM error: \(error.localizedDescription)"
@@ -223,15 +231,49 @@ class VLMService {
     /// File-based log (device console is flaky). Pull via:
     /// xcrun devicectl device copy from … Documents/vlm.log
     nonisolated static func log(_ line: String) {
+        NSLog("[VLM] %@", line)
+        #if DEBUG
+        // File log only in Debug: it never truncates and Documents is iCloud-backed.
         let mem = Int(MLX.Memory.activeMemory / (1024 * 1024))
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let url = docs.appendingPathComponent("vlm.log")
-        let entry = "[\(ISO8601DateFormatter().string(from: Date()))] [\(mem)MB] \(line)\n"
+        let entry = "[\(ISO8601DateFormatter().string(from: Date()))] [\(mem)MB fp=\(footprintMB)MB avail=\(os_proc_available_memory() / (1024 * 1024))MB] \(line)\n"
         if let h = try? FileHandle(forWritingTo: url) {
             h.seekToEndOfFile(); h.write(Data(entry.utf8)); try? h.close()
         } else {
             try? entry.data(using: .utf8)?.write(to: url)
         }
-        NSLog("[VLM] %@", line)
+        #endif
     }
+
+    #if DEBUG
+    /// Process physical footprint (what jetsam counts), in MB.
+    nonisolated static var footprintMB: Int {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return kr == KERN_SUCCESS ? Int(info.phys_footprint / (1024 * 1024)) : -1
+    }
+
+    /// Full description text, one JSON object per line, for building an offline eval set.
+    nonisolated static func debugAppendDescription(_ text: String, language: String, modelId: String) {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+              var line = try? JSONSerialization.data(withJSONObject: [
+                  "ts": ISO8601DateFormatter().string(from: Date()),
+                  "lang": language, "model": modelId, "text": text,
+              ])
+        else { return }
+        line.append(0x0A)
+        let url = docs.appendingPathComponent("descriptions.jsonl")
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile(); h.write(line); try? h.close()
+        } else {
+            try? line.write(to: url)
+        }
+    }
+    #endif
 }
