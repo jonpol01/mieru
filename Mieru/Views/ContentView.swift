@@ -15,10 +15,10 @@ struct ContentView: View {
     @State private var irodoriService = IrodoriTTSService()   // Irodori (MLX, JA VoiceDesign)
     @State private var catalog = ModelCatalog.shared
 
-    private let irodoriId = "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit"
+    private static let irodoriIds: Set<String> = [IrodoriTTSService.v3Id, IrodoriTTSService.v41MeanFlowId]
 
     /// Whichever TTS engine the catalog has marked active.
-    private var isIrodoriActive: Bool { catalog.activeTTSId == irodoriId }
+    private var isIrodoriActive: Bool { Self.irodoriIds.contains(catalog.defaultTTSId) }
 
     @State private var descriptionText = ""
     @State private var isThinking = false
@@ -228,6 +228,7 @@ struct ContentView: View {
     /// Load only the active TTS engine (one resident at a time to save memory).
     private func loadActiveTTS() async {
         if isIrodoriActive {
+            irodoriService.select(modelId: catalog.defaultTTSId)
             await irodoriService.load()
         } else {
             await speechService.load()
@@ -284,8 +285,9 @@ struct ContentView: View {
         guard let model = catalog.model(id: modelId) else { return }
         catalog.setActiveTTS(model)
 
-        if modelId == irodoriId {
+        if Self.irodoriIds.contains(modelId) {
             speechService.unload()
+            irodoriService.select(modelId: modelId)
             await irodoriService.load()
         } else {
             irodoriService.unload()
@@ -372,7 +374,7 @@ struct ContentView: View {
     /// `devicectl … process launch John-Soliva.Mieru -- -voice irodori -irodoriVoice 2 -autoCapture 3`
     ///   -lang ja|en           response language
     ///   -vlm <hf model id>    switch the vision model first (e.g. the QAT repo)
-    ///   -voice kokoro|irodori enable voice with that engine
+    ///   -voice kokoro|irodori|irodori4  enable voice with that engine (irodori4 = v4.1 MeanFlow)
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
     ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
     private func runDebugLaunchArguments() async {
@@ -388,7 +390,8 @@ struct ContentView: View {
         if let lang = value("-lang") { language = lang }
         if let vlm = value("-vlm") { await activateVLM(modelId: vlm) }
         if let voice = value("-voice") {
-            await activateTTS(modelId: voice == "irodori" ? irodoriId : "aufklarer/Kokoro-82M-CoreML")
+            let ttsIds = ["irodori": IrodoriTTSService.v3Id, "irodori4": IrodoriTTSService.v41MeanFlowId]
+            await activateTTS(modelId: ttsIds[voice] ?? "aufklarer/Kokoro-82M-CoreML")
             voiceEnabled = true
         }
         if let v = value("-irodoriVoice"), let i = Int(v), IrodoriTTSService.voices.indices.contains(i) {

@@ -542,10 +542,10 @@
 		};
 		AAB00006 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Blaizzy/mlx-audio-swift";
+			repositoryURL = "https://github.com/jonpol01/mlx-audio-swift";
 			requirement = {
-				kind = exactVersion;
-				version = 0.1.5;
+				kind = revision;
+				revision = c009e782e56c8513738df1d237aa82bc585d219f;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

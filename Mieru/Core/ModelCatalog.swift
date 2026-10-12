@@ -84,6 +84,16 @@ class ModelCatalog {
             format: .mlx,
             contextLength: 0, batch: 1, chunks: 1,
             estimatedSizeGB: 1.3
+        ),
+        // v4.1 MeanFlow distillation: 4 sampler steps without CFG, same captions and codec as v3.
+        ModelInfo(
+            id: "mlx-community/Irodori-TTS-v4.1-Small-MF-8bit",
+            displayName: "Irodori-TTS v4.1 MF (JP, fast)",
+            family: .other, kind: .tts,
+            architecture: "Irodori-TTS", modelType: "Irodori_MLXAudio",
+            format: .mlx,
+            contextLength: 0, batch: 1, chunks: 1,
+            estimatedSizeGB: 1.5
         )
     ]
 

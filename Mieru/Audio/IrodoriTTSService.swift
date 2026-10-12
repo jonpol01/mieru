@@ -47,7 +47,18 @@ class IrodoriTTSService {
         didSet { UserDefaults.standard.set(selectedVoice, forKey: "irodoriVoice") }
     }
 
-    let modelId = "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit"
+    static let v3Id = "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit"
+    static let v41MeanFlowId = "mlx-community/Irodori-TTS-v4.1-Small-MF-8bit"
+
+    /// Which Irodori checkpoint to load (both take the same VoiceDesign captions).
+    private(set) var modelId = IrodoriTTSService.v3Id
+
+    /// Switch checkpoints; the next load() picks it up.
+    func select(modelId newId: String) {
+        guard newId != modelId else { return }
+        unload()
+        modelId = newId
+    }
 
     private var model: SpeechGenerationModel?
     private var audioEngine: AVAudioEngine?
@@ -77,7 +88,7 @@ class IrodoriTTSService {
             MLX.Memory.cacheLimit = 32 * 1024 * 1024
             MLX.Memory.clearCache()
 
-            Self.log("load start — active=\(Self.activeMB)MB")
+            Self.log("load start \(modelId) — active=\(Self.activeMB)MB")
             let m = try await TTS.loadModel(modelRepo: modelId)
             model = m
             sampleRate = Double(m.sampleRate)
@@ -143,6 +154,10 @@ class IrodoriTTSService {
             lastAudioSeconds = Double(samples.count) / sampleRate
             lastRTF = synth > 0 ? lastAudioSeconds / synth : 0
             Self.log("synth OK \(samples.count) samples in \(String(format: "%.1f", synth))s (RTF \(String(format: "%.2f", lastRTF))) — active=\(Self.activeMB)MB peak=\(Self.peakMB)MB")
+            if let t = (capturedModel as? IrodoriTTSModel)?.lastTimings {
+                Self.log(String(format: "phases encode=%.2fs duration=%.2fs sampler=%.2fs decode=%.2fs frames=%d",
+                                t.encode, t.duration, t.sampler, t.decode, t.latentFrames))
+            }
             #if DEBUG
             Self.debugDumpWAV(samples: samples, rate: sampleRate, tag: "irodori")
             #endif
