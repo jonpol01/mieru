@@ -514,10 +514,10 @@
 		};
 		AAB00002 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
+			repositoryURL = "https://github.com/jonpol01/mlx-swift-lm";
 			requirement = {
-				kind = exactVersion;
-				version = 3.32.3;
+				kind = revision;
+				revision = ff980cfbc4c9532d168b1df4f24ae5e92c09a0f4;
 			};
 		};
 		AAB00003 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {

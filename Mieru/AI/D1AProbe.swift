@@ -11,6 +11,9 @@
 import Accelerate
 import CoreML
 import Foundation
+import MLX
+import MLXLMCommon
+@_spi(GemmaEncoder) import MLXVLM
 
 enum D1AProbe {
 
@@ -45,7 +48,163 @@ enum D1AProbe {
         return data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     }
 
-    static func run(units: MLComputeUnits, label: String) async {
+    /// MLX adapter check on the resident Gemma 4 VLM: Documents/d1a/adapter/{adapters.safetensors,
+    /// adapter_config.json, head.safetensors, d1a_config.json, layout.json, requests.jsonl, gate.json}.
+    /// Each question runs as one causal row (<bos> <state> state <q> branch <decide>), which equals
+    /// D1A's packed block-causal encoding for that question.
+    static func runAdapter(vlm: VLMService) async {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("d1a/adapter")
+        do {
+            let summary = try await vlm.debugPerform { context -> String in
+                guard let gemma = context.model as? Gemma4 else { return "model is not MLXVLM.Gemma4" }
+                func json(_ name: String) throws -> [String: Any] {
+                    try JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent(name))) as! [String: Any]
+                }
+                let layout = try json("layout.json")
+                let leading = layout["leading_ids"] as! [Int]
+                let escape = try NSRegularExpression(pattern: layout["escape_pattern"] as! String)
+                let special = try NSRegularExpression(pattern: #"<\|([A-Za-z0-9_]+)\|>"#)
+                func userTokens(_ text: String) -> [Int] {
+                    let ns = NSMutableString(string: text)
+                    for m in escape.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+                        ns.insert("¦", at: m.range.location + 1)
+                    }
+                    let t = special.stringByReplacingMatches(in: ns as String, range: NSRange(location: 0, length: ns.length), withTemplate: "<¦$1¦>")
+                    return context.tokenizer.encode(text: t, addSpecialTokens: false)
+                }
+                let temperature = Float((try json("d1a_config.json"))["temperature"] as! Double)
+                let head = try MLX.loadArrays(url: dir.appendingPathComponent("head.safetensors")).mapValues { $0.asType(.float32) }
+                let wq = head["q.weight"]!, bq = head["q.bias"]!, wk = head["k.weight"]!, bk = head["k.bias"]!
+                let scale = 1 / sqrtf(Float(wq.dim(0))) / temperature
+
+                var gate: [Int: [Int: [Double]]] = [:]
+                for row in (try json("gate.json"))["rows"] as! [[String: Any]] {
+                    gate[row["request"] as! Int, default: [:]][row["q"] as! Int] = row["p"] as? [Double]
+                }
+                let requests = try String(contentsOf: dir.appendingPathComponent("requests.jsonl"), encoding: .utf8)
+                    .split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+
+                // Rows per question: ids, the <decide> index and the </opt> indices.
+                func rows(_ request: [String: Any]) -> [(ids: [Int], decide: Int, opts: [Int])] {
+                    var state = leading, segments: [[Int]] = [], opts: [[Int]] = []
+                    for piece in request["pieces"] as! [[String: Any]] {
+                        if let d = piece["delimiter"] as? Int {
+                            if d == 7 { segments.append([]); opts.append([]) }
+                            if segments.isEmpty { state.append(d) } else {
+                                if d == 9 { opts[opts.count - 1].append(segments[segments.count - 1].count) }
+                                segments[segments.count - 1].append(d)
+                            }
+                        } else {
+                            let ids = userTokens(piece["text"] as! String)
+                            if segments.isEmpty { state += ids } else { segments[segments.count - 1] += ids }
+                        }
+                    }
+                    return segments.indices.map { k in
+                        (state + segments[k], state.count + segments[k].count - 1, opts[k].map { state.count + $0 })
+                    }
+                }
+
+                // Adapter off must leave Gemma untouched: compare one row's hidden states before and after.
+                let probeIds = MLXArray(rows(requests[0])[0].ids.map { Int32($0) }).expandedDimensions(axis: 0)
+                let before = gemma.textHiddenStates(probeIds).asType(.float32)
+                eval(before)
+
+                let lora = try LoRAContainer.from(directory: dir)
+                var t = now()
+                try lora.load(into: gemma)
+                let loadSeconds = now() - t
+
+                var times: [Double] = [], maxDp = 0.0, flips = 0, clearFlips = 0, questions = 0
+                for (ri, request) in requests.enumerated() {
+                    t = now()
+                    for (qi, row) in rows(request).enumerated() {
+                        let h = gemma.textHiddenStates(MLXArray(row.ids.map { Int32($0) }).expandedDimensions(axis: 0))[0].asType(.float32)
+                        let hq = matmul(h[row.decide], wq.T) + bq
+                        let hk = matmul(h[MLXArray(row.opts.map { Int32($0) })], wk.T) + bk
+                        let p = softmax(matmul(hk, hq) * scale, axis: -1)
+                        eval(p)
+                        let probs = p.asArray(Float.self).map { Double($0) }
+                        questions += 1
+                        guard let ref = gate[ri]?[qi] else { continue }
+                        maxDp = max(maxDp, zip(probs, ref).map { abs($0 - $1) }.max() ?? 0)
+                        let top = probs.indices.max { probs[$0] < probs[$1] }!, refTop = ref.indices.max { ref[$0] < ref[$1] }!
+                        if top != refTop {
+                            flips += 1
+                            let sorted = ref.sorted(by: >)
+                            if sorted[0] - sorted[1] > 0.05 { clearFlips += 1 }
+                        }
+                    }
+                    times.append(now() - t)
+                }
+
+                lora.unload(from: gemma)
+                let after = gemma.textHiddenStates(probeIds).asType(.float32)
+                let offDiff = abs(after - before).max().item(Float.self)
+
+                let s = times.sorted()
+                return String(format: "adapter DONE: load %.2fs | %d requests, %d questions | p50 %.3fs p95 %.3fs first %.3fs | vs Mac adapter: %d top changes (%d clear-cut), max|dp| %.3f | adapter off max|dh| %g | fp=%dMB peak=%dMB",
+                              loadSeconds, times.count, questions, s[s.count / 2], s[min(s.count - 1, s.count * 95 / 100)],
+                              times.first ?? 0, flips, clearFlips, maxDp, offDiff, VLMService.footprintMB, peakFootprintMB)
+            }
+            log(summary)
+        } catch {
+            log("adapter FAILED: \(String(describing: error))")
+        }
+    }
+
+    /// Vision encoder check: Documents/d1a/vision/{VisionEncoder.mlmodelc, pixels_i.bin, embeds_i.bin}
+    /// against the transformers fp32 reference. Gate: min per-row cosine >= 0.98.
+    static func runVision(units: MLComputeUnits, label: String) async {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("d1a/vision")
+        do {
+            let config = MLModelConfiguration()
+            config.computeUnits = units
+            let t = now()
+            let model = try await MLModel.load(contentsOf: dir.appendingPathComponent("VisionEncoder.mlmodelc"), configuration: config)
+            log(String(format: "vision load (%@) %.1fs fp=%dMB", label, now() - t, VLMService.footprintMB))
+            var times: [Double] = []
+            for i in 0..<3 {
+                let pixels = try MLMultiArray(shape: [1, 3, 672, 912], dataType: .float32)
+                let pdata = try Data(contentsOf: dir.appendingPathComponent("pixels_\(i).bin"))
+                pdata.withUnsafeBytes { pixels.dataPointer.copyMemory(from: $0.baseAddress!, byteCount: pdata.count) }
+                let input = try MLDictionaryFeatureProvider(dictionary: ["pixels": MLFeatureValue(multiArray: pixels)])
+                var out: MLMultiArray?
+                for pass in 0..<2 {   // the second pass is the warm timing
+                    let tp = now()
+                    out = try await model.prediction(from: input).featureValue(for: "image_embeds")?.multiArrayValue
+                    if pass == 1 { times.append(now() - tp) }
+                }
+                guard let out else { log("vision \(i): no output"); continue }
+                let ref = try floats(dir.appendingPathComponent("embeds_\(i).bin"))
+                let rows = out.shape[0].intValue, cols = out.shape[1].intValue, rs = out.strides[0].intValue
+                let o = out.dataPointer.bindMemory(to: Float.self, capacity: out.count)
+                var minCos: Float = 1, maxDiff: Float = 0
+                for r in 0..<rows {
+                    var dot: Float = 0, na: Float = 0, nb: Float = 0
+                    for c in 0..<cols {
+                        let a = o[r * rs + c], b = ref[r * cols + c]
+                        dot += a * b; na += a * a; nb += b * b
+                        maxDiff = max(maxDiff, abs(a - b))
+                    }
+                    minCos = min(minCos, dot / (sqrtf(na) * sqrtf(nb) + 1e-12))
+                }
+                log(String(format: "vision %d (%@): %.0f ms warm, min cos %.4f, max|d| %.3f %@", i, label,
+                           times.last! * 1000, minCos, maxDiff, minCos >= 0.98 ? "PASS" : "FAIL"))
+            }
+            let s = times.sorted()
+            log(String(format: "vision DONE (%@): median %.0f ms/image, fp=%dMB peak=%dMB",
+                       label, s[s.count / 2] * 1000, VLMService.footprintMB, peakFootprintMB))
+        } catch {
+            log("vision FAILED (\(label)): \(String(describing: error))")
+        }
+    }
+
+    /// `feedsDir` holds text feeds, or photo feeds (pixels.bin + image_rows.bin) that first go
+    /// through the vision encoder. Answers are compared with `baseline` (the Mac run of the same
+    /// build) when present, otherwise with each feed's fp32 `ref`.
+    static func run(units: MLComputeUnits, label: String, feedsDir: String = "feeds", baseline: String = "mac_int4.json") async {
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("d1a")
         do {
@@ -76,13 +235,17 @@ enum D1AProbe {
             }
 
             // Mac reference: feed -> question -> p.
-            let mac = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("mac_int4.json"))) as! [String: Any]
             var macP: [String: [Int: [Double]]] = [:]
-            for row in mac["rows"] as! [[String: Any]] {
-                macP[(row["feed"] as! String).replacingOccurrences(of: ".npz", with: ""), default: [:]][row["q"] as! Int] = row["p"] as? [Double]
+            if let data = try? Data(contentsOf: root.appendingPathComponent(baseline)),
+               let mac = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                for row in mac["rows"] as! [[String: Any]] {
+                    macP[(row["feed"] as! String).replacingOccurrences(of: ".npz", with: ""), default: [:]][row["q"] as! Int] = row["p"] as? [Double]
+                }
             }
+            let reference = macP.isEmpty ? "fp32 ref" : "Mac int4"
+            var encoder: MLModel?
 
-            let feedDir = root.appendingPathComponent("feeds")
+            let feedDir = root.appendingPathComponent(feedsDir)
             let feeds = try FileManager.default.contentsOfDirectory(atPath: feedDir.path).sorted()
             var times: [Double] = [], maxDp = 0.0, flips = 0, clearFlips = 0, questions = 0
             for (fi, feed) in feeds.enumerated() {
@@ -93,8 +256,30 @@ enum D1AProbe {
                     "mask_full": MLFeatureValue(multiArray: try array(d.appendingPathComponent("mask_full.bin"), [1, 1, 512, 512], .float16)),
                     "mask_slide": MLFeatureValue(multiArray: try array(d.appendingPathComponent("mask_slide.bin"), [1, 1, 512, 512], .float16)),
                 ]
+                let emb = try array(d.appendingPathComponent("emb.bin"), [1, 512, 1536], .float16)
+                var encodeSeconds = 0.0
+                if FileManager.default.fileExists(atPath: d.appendingPathComponent("pixels.bin").path) {
+                    // Photo feed: the encoder output replaces the image-token rows of emb.
+                    if encoder == nil {
+                        encoder = try await MLModel.load(
+                            contentsOf: root.appendingPathComponent("vision/VisionEncoder.mlmodelc"), configuration: config)
+                    }
+                    let pixels = try MLMultiArray(shape: [1, 3, 672, 912], dataType: .float32)
+                    let pdata = try Data(contentsOf: d.appendingPathComponent("pixels.bin"))
+                    pdata.withUnsafeBytes { pixels.dataPointer.copyMemory(from: $0.baseAddress!, byteCount: pdata.count) }
+                    let te = now()
+                    let image = try await encoder!.prediction(from: MLDictionaryFeatureProvider(
+                        dictionary: ["pixels": MLFeatureValue(multiArray: pixels)])).featureValue(for: "image_embeds")!.multiArrayValue!
+                    encodeSeconds = now() - te
+                    let rowsIdx = try Data(contentsOf: d.appendingPathComponent("image_rows.bin")).withUnsafeBytes { Array($0.bindMemory(to: Int32.self)) }
+                    let src = image.dataPointer.bindMemory(to: Float.self, capacity: image.count), srcStride = image.strides[0].intValue
+                    let dst = emb.dataPointer.bindMemory(to: Float16.self, capacity: emb.count), dstStride = emb.strides[1].intValue
+                    for (r, row) in rowsIdx.enumerated() {
+                        for c in 0..<1536 { dst[Int(row) * dstStride + c] = Float16(src[r * srcStride + c]) }
+                    }
+                }
                 var state: [String: MLFeatureValue] = [
-                    "emb": MLFeatureValue(multiArray: try array(d.appendingPathComponent("emb.bin"), [1, 512, 1536], .float16)),
+                    "emb": MLFeatureValue(multiArray: emb),
                     "ple_tok": MLFeatureValue(multiArray: try array(d.appendingPathComponent("ple_tok.bin"), [1, 512, 35, 256], .float16)),
                     "picks": MLFeatureValue(multiArray: try array(d.appendingPathComponent("picks.bin"), [128], .int32)),
                 ]
@@ -134,7 +319,13 @@ enum D1AProbe {
                     let s = z.reduce(0, +)
                     let p = z.map { Double($0 / s) }
                     questions += 1
-                    guard let ref = macP[feed]?[qi] else { continue }
+                    let fp32 = (meta["ref"] as? [[Double]]).flatMap { qi < $0.count ? $0[qi] : nil }
+                    guard let ref = macP[feed]?[qi] ?? fp32 else { continue }
+                    if let photo = meta["photo"] as? String {
+                        log(String(format: "%@ q%d p=%@ ref=%@ (encode %.0f ms)", photo, qi,
+                                   p.map { String(format: "%.3f", $0) }.joined(separator: ","),
+                                   ref.map { String(format: "%.3f", $0) }.joined(separator: ","), encodeSeconds * 1000))
+                    }
                     maxDp = max(maxDp, zip(p, ref).map { abs($0 - $1) }.max() ?? 0)
                     let top = p.indices.max { p[$0] < p[$1] }!, refTop = ref.indices.max { ref[$0] < ref[$1] }!
                     if top != refTop {
@@ -148,9 +339,9 @@ enum D1AProbe {
                 }
             }
             let s = times.sorted()
-            log(String(format: "DONE %@: %d requests, %d questions | p50 %.2fs p95 %.2fs first %.2fs | vs Mac int4: %d top changes (%d clear-cut), max|dp| %.3f | peak fp=%dMB thermal=%d",
-                       label, times.count, questions, s[s.count / 2], s[min(s.count - 1, s.count * 95 / 100)], times.first ?? 0,
-                       flips, clearFlips, maxDp, peakFootprintMB, ProcessInfo.processInfo.thermalState.rawValue))
+            log(String(format: "DONE %@ (%@): %d requests, %d questions | p50 %.2fs p95 %.2fs first %.2fs | vs %@: %d top changes (%d clear-cut), max|dp| %.3f | peak fp=%dMB thermal=%d",
+                       label, feedsDir, times.count, questions, s[s.count / 2], s[min(s.count - 1, s.count * 95 / 100)], times.first ?? 0,
+                       reference, flips, clearFlips, maxDp, peakFootprintMB, ProcessInfo.processInfo.thermalState.rawValue))
         } catch {
             log("FAILED (\(label)): \(String(describing: error))")
         }

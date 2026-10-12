@@ -376,6 +376,7 @@ struct ContentView: View {
     ///   -lang ja|en           response language
     ///   -vlm <hf model id>    switch the vision model first (e.g. the QAT repo)
     ///   -voice kokoro|irodori|irodori4  enable voice with that engine (irodori4 = v4.1 MeanFlow)
+    ///   -d1aProbe ane|gpu|cpu|all [-d1aVision]  D1A Core ML trunk (or vision encoder) check, see D1AProbe
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
     ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
     private func runDebugLaunchArguments() async {
@@ -398,6 +399,14 @@ struct ContentView: View {
         if let v = value("-irodoriVoice"), let i = Int(v), IrodoriTTSService.voices.indices.contains(i) {
             irodoriService.selectedVoice = IrodoriTTSService.voices[i]
         }
+        if args.contains("-d1aAdapter") {
+            // D1A as an unmerged adapter on the resident Gemma: no second model to load.
+            speechService.unload()
+            irodoriService.unload()
+            VLMService.log("d1a: adapter start fp=\(VLMService.footprintMB)MB")
+            await D1AProbe.runAdapter(vlm: vlmService)
+            return
+        }
         if let units = value("-d1aProbe") {
             // D1A runs as a separate model: free Gemma and the voices first, as the app would.
             vlmService.unload()
@@ -406,7 +415,14 @@ struct ContentView: View {
             for _ in 0..<50 where VLMService.footprintMB > 1500 { try? await Task.sleep(for: .milliseconds(100)) }
             VLMService.log("d1a: start units=\(units) fp=\(VLMService.footprintMB)MB")
             let map: [String: MLComputeUnits] = ["ane": .cpuAndNeuralEngine, "gpu": .cpuAndGPU, "cpu": .cpuOnly, "all": .all]
-            await D1AProbe.run(units: map[units] ?? .cpuAndNeuralEngine, label: units)
+            if args.contains("-d1aPhoto") {
+                await D1AProbe.run(units: map[units] ?? .cpuAndNeuralEngine, label: units,
+                                   feedsDir: "photo/feeds", baseline: "photo/mac_int4.json")
+            } else if args.contains("-d1aVision") {
+                await D1AProbe.runVision(units: map[units] ?? .cpuAndNeuralEngine, label: units)
+            } else {
+                await D1AProbe.run(units: map[units] ?? .cpuAndNeuralEngine, label: units)
+            }
             return
         }
         guard args.contains("-autoCapture") else { return }

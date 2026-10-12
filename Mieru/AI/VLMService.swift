@@ -248,6 +248,12 @@ class VLMService {
     }
 
     #if DEBUG
+    /// Runs `action` on the loaded model (loading it first) — for DEBUG probes that need the model itself.
+    func debugPerform<R: Sendable>(_ action: @Sendable (ModelContext) async throws -> sending R) async throws -> R {
+        let container = try await _load(modelId: currentModelId)
+        return try await container.perform(action)
+    }
+
     /// Process physical footprint (what jetsam counts), in MB.
     nonisolated static var footprintMB: Int {
         var info = task_vm_info_data_t()
