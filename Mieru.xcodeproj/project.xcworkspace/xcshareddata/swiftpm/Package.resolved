@@ -51,7 +51,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/jonpol01/mlx-audio-swift",
       "state" : {
-        "revision" : "c009e782e56c8513738df1d237aa82bc585d219f"
+        "revision" : "deebf96110dbca712d52c92276ec4d9f6845539c"
       }
     },
     {
