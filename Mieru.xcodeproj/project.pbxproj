@@ -512,8 +512,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
 			requirement = {
-				kind = revision;
-				revision = a47894a1e7e963b24bd48c030f5fc1d1627e60e9;
+				kind = exactVersion;
+				version = 3.32.3;
 			};
 		};
 		AAB00003 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
@@ -536,16 +536,16 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/soniqo/speech-swift";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = revision;
+				revision = f8f079ccc724d7a999b5d93d4784bf65c9ec8ff5;
 			};
 		};
 		AAB00006 /* XCRemoteSwiftPackageReference "mlx-audio-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/jonpol01/mlx-audio-swift";
+			repositoryURL = "https://github.com/Blaizzy/mlx-audio-swift";
 			requirement = {
-				branch = "irodori-tts";
-				kind = branch;
+				kind = exactVersion;
+				version = 0.1.5;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

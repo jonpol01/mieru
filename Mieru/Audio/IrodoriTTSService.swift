@@ -74,8 +74,8 @@ class IrodoriTTSService {
             // Keep MLX's buffer cache small — Irodori (~1.3 GB) may load alongside the
             // resident Gemma 4 brain (~1.5 GB) + camera; a low cache limit returns
             // transient load buffers to the OS instead of caching them.
-            MLX.GPU.set(cacheLimit: 32 * 1024 * 1024)
-            MLX.GPU.clearCache()
+            MLX.Memory.cacheLimit = 32 * 1024 * 1024
+            MLX.Memory.clearCache()
 
             Self.log("load start — active=\(Self.activeMB)MB")
             let m = try await TTS.loadModel(modelRepo: modelId)
@@ -99,7 +99,7 @@ class IrodoriTTSService {
         stop()
         model = nil
         isLoaded = false
-        MLX.GPU.clearCache()
+        MLX.Memory.clearCache()
     }
 
     // MARK: - Speak
@@ -120,7 +120,7 @@ class IrodoriTTSService {
         // VoiceDesign caption. Default to the first preset so it matches the picker top.
         let voice = selectedVoice ?? Self.voices.first
         let capturedModel = model
-        MLX.GPU.clearCache()
+        MLX.Memory.clearCache()
         Self.log("synth start len=\(cleanText.count) voice=\(voice ?? "nil") — active=\(Self.activeMB)MB")
 
         do {
@@ -223,9 +223,9 @@ class IrodoriTTSService {
 
 extension IrodoriTTSService {
     /// Active MLX memory in MB.
-    nonisolated static var activeMB: Int { Int(MLX.GPU.activeMemory / (1024 * 1024)) }
+    nonisolated static var activeMB: Int { Int(MLX.Memory.activeMemory / (1024 * 1024)) }
     /// Peak MLX memory in MB.
-    nonisolated static var peakMB: Int { Int(MLX.GPU.peakMemory / (1024 * 1024)) }
+    nonisolated static var peakMB: Int { Int(MLX.Memory.peakMemory / (1024 * 1024)) }
 
     /// File-based log (device console is flaky). Pull via:
     /// xcrun devicectl device copy from … Documents/irodori.log

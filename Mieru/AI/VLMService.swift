@@ -36,8 +36,7 @@ class VLMService {
     public var lastTokensPerSecond: Double = 0
     public var lastTokenCount: Int = 0
 
-    private let generateParameters = GenerateParameters(temperature: 0.6)
-    private let maxTokens = 150
+    private let generateParameters = GenerateParameters(maxTokens: 150, temperature: 0.6)
 
     public var isReady: Bool { isLoaded && !running }
 
@@ -54,7 +53,7 @@ class VLMService {
         do { _ = try await _load(modelId: currentModelId) }
         catch {
             statusMessage = "Load error: \(error.localizedDescription)"
-            NSLog("[VLM] %@", statusMessage)
+            Self.log("load FAILED \(currentModelId): \(String(describing: error))")
         }
     }
 
@@ -108,7 +107,7 @@ class VLMService {
             unload()
         }
 
-        MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
+        MLX.Memory.cacheLimit = 20 * 1024 * 1024
         statusMessage = "Downloading…"
         let config = ModelConfiguration(id: modelId)
 
@@ -117,7 +116,12 @@ class VLMService {
         downloadedBytes = 0
         totalBytes = 0
 
-        let container = try await #huggingFaceLoadModelContainer(
+        // Load through the VLM factory explicitly. The generic loader tries VLM then LLM
+        // and keeps the first success; MLXLLM (linked via mlx-audio-swift) also accepts
+        // "gemma4" as text-only, so a VLM failure would silently drop the vision tower.
+        let container = try await VLMModelFactory.shared.loadContainer(
+            from: #hubDownloader(),
+            using: #huggingFaceTokenizerLoader(),
             configuration: config
         ) { [weak self] progress in
             Task { @MainActor in
@@ -174,18 +178,29 @@ class VLMService {
                 additionalContext: ["enable_thinking": false]
             )
 
-            let tokenLimit = self.maxTokens
-            let result = try await container.perform { context in
-                let input = try await context.processor.prepare(input: userInput)
-                return try MLXLMCommon.generate(
-                    input: input, parameters: self.generateParameters, context: context
-                ) { tokens in tokens.count >= tokenLimit ? .stop : .more }
+            let input = try await container.prepare(input: userInput)
+            // Diagnostic: confirm the image actually reached the prompt (Gemma 4 <|image|> = 258880).
+            let imageTokens = (input.text.tokens .== 258_880).sum().item(Int.self)
+            let firstToken = input.text.tokens.flattened()[0].item(Int.self)   // 2 = <bos>
+            Self.log("prepare: promptTokens=\(input.text.tokens.size) firstToken=\(firstToken) imageTokens=\(imageTokens) pixels=\(input.image?.pixels.shape.description ?? "nil")")
+            let stream = try await container.generate(input: input, parameters: generateParameters)
+
+            var text = ""
+            for await event in stream {
+                switch event {
+                case .chunk(let piece):
+                    text += piece
+                case .info(let info):
+                    self.lastTokensPerSecond = info.tokensPerSecond
+                    self.lastTokenCount = info.generationTokenCount
+                default:
+                    break   // tool calls / other events: unused here
+                }
             }
 
-            self.output = result.output
-            self.lastTokensPerSecond = result.tokensPerSecond
-            self.lastTokenCount = result.tokenIds.count
-            return result.output
+            self.output = text
+            Self.log("describe OK \(lastTokenCount) tok @ \(String(format: "%.1f", lastTokensPerSecond)) tok/s: \(text.prefix(120))")
+            return text
         } catch {
             let msg = "VLM error: \(error.localizedDescription)"
             self.output = msg; NSLog("[VLM] %@", msg)
@@ -200,7 +215,7 @@ class VLMService {
         output = ""
         statusMessage = ""
         downloadProgress = 0
-        MLX.GPU.clearCache()
+        MLX.Memory.clearCache()
     }
 
     // MARK: - Diagnostics
@@ -208,7 +223,7 @@ class VLMService {
     /// File-based log (device console is flaky). Pull via:
     /// xcrun devicectl device copy from … Documents/vlm.log
     nonisolated static func log(_ line: String) {
-        let mem = Int(MLX.GPU.activeMemory / (1024 * 1024))
+        let mem = Int(MLX.Memory.activeMemory / (1024 * 1024))
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let url = docs.appendingPathComponent("vlm.log")
         let entry = "[\(ISO8601DateFormatter().string(from: Date()))] [\(mem)MB] \(line)\n"

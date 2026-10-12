@@ -1,5 +1,5 @@
 {
-  "originHash" : "53d96bcb60fe14512448da0954c0d844e5bcb8ae757c94583a826f625b0529c8",
+  "originHash" : "8fb7b1fdde2434bb7aa60a83e3b676d3a3acc1efe477b128497ec0c8dd20a660",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -49,10 +49,10 @@
     {
       "identity" : "mlx-audio-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/jonpol01/mlx-audio-swift",
+      "location" : "https://github.com/Blaizzy/mlx-audio-swift",
       "state" : {
-        "branch" : "irodori-tts",
-        "revision" : "250d46e7922a1fc09e9e206d66fc078e7abfdfbb"
+        "revision" : "dbe5eaac964e8257785f9d015c81f819a38016a8",
+        "version" : "0.1.5"
       }
     },
     {
@@ -60,8 +60,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ml-explore/mlx-swift",
       "state" : {
-        "revision" : "dc43e62d7055353c7f99fa071a4e71d29dfddc44",
-        "version" : "0.31.4"
+        "revision" : "19601207e9a0de51e03ee6ec0c3c5f3784275075",
+        "version" : "0.32.3"
       }
     },
     {
@@ -69,7 +69,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ml-explore/mlx-swift-lm",
       "state" : {
-        "revision" : "a47894a1e7e963b24bd48c030f5fc1d1627e60e9"
+        "revision" : "3b339ad6e3b3f44c8121ecff5131c7fd55e075e6",
+        "version" : "3.32.3"
       }
     },
     {
@@ -77,8 +78,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/soniqo/speech-swift",
       "state" : {
-        "branch" : "main",
-        "revision" : "35fd73f0c5f5b4d931cab60260d6edc34fed6533"
+        "revision" : "f8f079ccc724d7a999b5d93d4784bf65c9ec8ff5"
       }
     },
     {
@@ -311,8 +311,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-system.git",
       "state" : {
-        "revision" : "7c6ad0fc39d0763e0b699210e4124afd5041c5df",
-        "version" : "1.6.4"
+        "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
+        "version" : "1.8.1"
       }
     },
     {
@@ -331,6 +331,15 @@
       "state" : {
         "revision" : "ca48d46c25f8fa948d37eaa480c73172182cf90f",
         "version" : "1.5.0"
+      }
+    },
+    {
+      "identity" : "whisperkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/argmaxinc/WhisperKit",
+      "state" : {
+        "revision" : "1bbc57cb7fe6410248a685b1c5a3c6d56adc2ed4",
+        "version" : "1.1.1"
       }
     },
     {

@@ -142,6 +142,14 @@ struct ContentView: View {
                     await loadActiveTTS()
                     await catalog.scanCache()
                     resetIdleTimer()
+                    #if DEBUG
+                    // Remote device testing: `devicectl … process launch John-Soliva.Mieru -autoCapture`
+                    // fires one しらべる once the model is ready (no screen taps needed).
+                    if ProcessInfo.processInfo.arguments.contains("-autoCapture") {
+                        try? await Task.sleep(for: .seconds(3))
+                        captureAndDescribe()
+                    }
+                    #endif
                 }
             }
         }
@@ -393,7 +401,9 @@ struct ContentView: View {
     private func startAutoMode() {
         captureAndDescribe()
         autoTimer = Timer.scheduledTimer(withTimeInterval: 6.0, repeats: true) { _ in
-            if vlmService.isReady { captureAndDescribe() }
+            Task { @MainActor in
+                if vlmService.isReady { captureAndDescribe() }
+            }
         }
     }
 

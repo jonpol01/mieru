@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import CoreML
 import KokoroTTS
 import AudioCommon
 
@@ -43,8 +44,11 @@ class SpeechService {
                 for: KokoroTTSModel.defaultModelId)
             await predownloadVoice("jf_alpha", to: cacheDir)
 
+            // CPU + Neural Engine only: a GPU fallback would share the Metal queue
+            // MLX owns for Gemma / Irodori.
             let tts = try await KokoroTTSModel.fromPretrained(
-                voice: "af_heart"
+                voice: "af_heart",
+                computeUnits: .cpuAndNeuralEngine
             ) { [weak self] progress, status in
                 Task { @MainActor in
                     self?.statusMessage = "TTS: \(status)"
