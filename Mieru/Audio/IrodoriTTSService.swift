@@ -115,6 +115,13 @@ class IrodoriTTSService {
 
         let cleanText = trimToCompleteSentences(text)
         guard !cleanText.isEmpty else { isSpeaking = false; return }
+        // Gemma sometimes answers in English despite a Japanese prompt; Irodori can only
+        // read Japanese, so leave such text on screen unspoken instead of voicing gibberish.
+        guard containsJapanese(cleanText) else {
+            Self.log("synth skipped: no Japanese script in text")
+            isSpeaking = false
+            return
+        }
 
         // Irodori is a Japanese-only model: no language routing, and the "voice" is a
         // VoiceDesign caption. Default to the first preset so it matches the picker top.
@@ -245,6 +252,7 @@ extension IrodoriTTSService {
         } else {
             try? entry.data(using: .utf8)?.write(to: url)
         }
+        VLMService.debugExcludeFromBackup(url)
         #endif
     }
 }
@@ -259,6 +267,7 @@ extension IrodoriTTSService {
         else { return }
         let dir = docs.appendingPathComponent("tts_dumps", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        VLMService.debugExcludeFromBackup(dir)
 
         let pcm = samples.map { Int16(max(-1, min(1, $0)) * Float(Int16.max)) }
         let sr = UInt32(rate)
@@ -275,6 +284,13 @@ extension IrodoriTTSService {
 #endif
 
 // MARK: - Text Processing
+
+/// True if the text has any Hiragana, Katakana or CJK ideograph.
+private func containsJapanese(_ text: String) -> Bool {
+    text.unicodeScalars.contains {
+        (0x3040...0x30FF).contains($0.value) || (0x4E00...0x9FFF).contains($0.value)
+    }
+}
 
 private func trimToCompleteSentences(_ text: String) -> String {
     let endings: [Character] = ["。", "！", "？", ".", "!", "?"]

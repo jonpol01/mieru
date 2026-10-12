@@ -38,6 +38,10 @@ struct ContentView: View {
 
     /// Tracks the generation to discard stale results.
     @State private var generation = 0
+    #if DEBUG
+    /// The camera restarts on every foreground, re-firing onChange(isRunning); run the harness once.
+    @State private var debugHarnessStarted = false
+    #endif
 
     /// Whether to show cancel (thinking, synthesizing voice, OR typing)
     private var showCancel: Bool { isThinking || isSynthesizing || isTyping }
@@ -323,6 +327,7 @@ struct ContentView: View {
 
             guard currentGen == generation else { return }
             isThinking = false
+            if result.isEmpty { VLMService.log("describe returned empty text") }
 
             if voiceEnabled {
                 // Sync text with voice: show a "preparing voice" state, synthesize, and
@@ -371,6 +376,8 @@ struct ContentView: View {
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
     ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
     private func runDebugLaunchArguments() async {
+        guard !debugHarnessStarted else { return }
+        debugHarnessStarted = true
         let args = ProcessInfo.processInfo.arguments
         func value(_ flag: String) -> String? {
             guard let i = args.firstIndex(of: flag), i + 1 < args.count,
@@ -407,7 +414,8 @@ struct ContentView: View {
                     || speechService.isSpeaking || irodoriService.isSpeaking
                 idlePolls = (!descriptionText.isEmpty && !busy) ? idlePolls + 1 : 0
                 if idlePolls >= 2 { break }
-                if poll == 40 && descriptionText.isEmpty && !busy {
+                // A Gemma reload doesn't set isThinking, so only warn once the model is in.
+                if poll == 40 && descriptionText.isEmpty && !busy && vlmService.isLoaded {
                     VLMService.log("debug: cycle \(cycle) produced nothing after 20s (no frame or still loading?)")
                 }
             }
@@ -466,6 +474,7 @@ struct ContentView: View {
     // MARK: - Lifecycle
 
     private func handleBackground() {
+        VLMService.log("lifecycle: background — models released")
         UIApplication.shared.isIdleTimerDisabled = false
         idleTimer?.invalidate()
         stopAutoMode()
@@ -476,6 +485,7 @@ struct ContentView: View {
     }
 
     private func handleForeground() {
+        VLMService.log("lifecycle: foreground")
         // Re-assert keep-awake — it was cleared on background.
         UIApplication.shared.isIdleTimerDisabled = true
         cameraManager.start()

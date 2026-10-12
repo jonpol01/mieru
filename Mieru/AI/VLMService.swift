@@ -243,6 +243,7 @@ class VLMService {
         } else {
             try? entry.data(using: .utf8)?.write(to: url)
         }
+        debugExcludeFromBackup(url)
         #endif
     }
 
@@ -274,6 +275,15 @@ class VLMService {
         } else {
             try? line.write(to: url)
         }
+        debugExcludeFromBackup(url)
+    }
+
+    /// Debug artifacts hold what the camera saw; keep them out of iCloud / Finder backups.
+    nonisolated static func debugExcludeFromBackup(_ url: URL) {
+        var url = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
     }
     #endif
 }
