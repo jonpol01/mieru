@@ -48,6 +48,24 @@ enum D1AProbe {
         return data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     }
 
+    /// Describe-flow smoke test: the cases in describe_flow.json through the in-app decide path.
+    static func runFlow(vlm: VLMService) async {
+        let url = VLMService.d1aDirectory.appendingPathComponent("describe_flow.json")
+        guard let data = try? Data(contentsOf: url),
+              let flow = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cases = flow["cases"] as? [[String: Any]] else { log("flow: no describe_flow.json"); return }
+        for c in cases {
+            let previous = (c["previous"] as? String).flatMap { $0.isEmpty || $0 == "(none)" ? nil : $0 }
+            let t = now()
+            guard let p = await vlm.decide(previous: previous, new: c["new"] as! String) else {
+                log("flow \(c["name"] ?? "?"): decide returned nil"); continue
+            }
+            log(String(format: "flow %@: redundant=%.2f vague=%.2f (%.2fs) mac=%@", c["name"] as? String ?? "?",
+                       p["redundant"] ?? -1, p["vague"] ?? -1, now() - t, String(describing: c["mac_mlx_q8_p"] ?? "")))
+        }
+        log("flow DONE")
+    }
+
     /// MLX adapter check on the resident Gemma 4 VLM: Documents/d1a/adapter/{adapters.safetensors,
     /// adapter_config.json, head.safetensors, d1a_config.json, layout.json, requests.jsonl, gate.json}.
     /// Each question runs as one causal row (<bos> <state> state <q> branch <decide>), which equals

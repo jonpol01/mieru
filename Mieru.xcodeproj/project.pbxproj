@@ -15,6 +15,7 @@
 		AA000006 /* CameraManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100006 /* CameraManager.swift */; };
 		AA000007 /* VLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100007 /* VLMService.swift */; };
 		AA0000D1 /* D1AProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000D1 /* D1AProbe.swift */; };
+		AA0000D2 /* D1ADecider.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000D2 /* D1ADecider.swift */; };
 		AA000008 /* TypewriterSFX.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100008 /* TypewriterSFX.swift */; };
 		AA000013 /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100014 /* SpeechService.swift */; };
 		AA000029 /* IrodoriTTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100021 /* IrodoriTTSService.swift */; };
@@ -47,6 +48,7 @@
 		AA100006 /* CameraManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManager.swift; sourceTree = "<group>"; };
 		AA100007 /* VLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLMService.swift; sourceTree = "<group>"; };
 		AA1000D1 /* D1AProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D1AProbe.swift; sourceTree = "<group>"; };
+		AA1000D2 /* D1ADecider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D1ADecider.swift; sourceTree = "<group>"; };
 		AA100008 /* TypewriterSFX.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterSFX.swift; sourceTree = "<group>"; };
 		AA100014 /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
 		AA100021 /* IrodoriTTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IrodoriTTSService.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 			children = (
 				AA100007 /* VLMService.swift */,
 				AA1000D1 /* D1AProbe.swift */,
+				AA1000D2 /* D1ADecider.swift */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -279,6 +282,7 @@
 				AA000006 /* CameraManager.swift in Sources */,
 				AA000007 /* VLMService.swift in Sources */,
 				AA0000D1 /* D1AProbe.swift in Sources */,
+				AA0000D2 /* D1ADecider.swift in Sources */,
 				AA000008 /* TypewriterSFX.swift in Sources */,
 				AA000013 /* SpeechService.swift in Sources */,
 				AA000029 /* IrodoriTTSService.swift in Sources */,

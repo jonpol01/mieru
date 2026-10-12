@@ -216,6 +216,47 @@ class VLMService {
         }
     }
 
+    // MARK: - D1A decisions
+
+    /// D1A's adapter folder; the question set sits next to it as describe_flow.json.
+    static let d1aDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("d1a/adapter")
+
+    var d1aAvailable: Bool {
+        FileManager.default.fileExists(atPath: Self.d1aDirectory.appendingPathComponent("adapters.safetensors").path)
+    }
+
+    private var d1a: D1ADecider?
+    private var d1aQuestions: [D1ADecider.Question] = []
+
+    /// p(yes) per describe-flow question ("redundant", "vague") for `new`, given the last spoken
+    /// description. nil when D1A isn't installed or fails — the caller then simply speaks.
+    func decide(previous: String?, new: String) async -> [String: Float]? {
+        guard d1aAvailable, !running else { return nil }
+        running = true
+        defer { running = false }
+        do {
+            if d1a == nil {
+                d1a = try D1ADecider(directory: Self.d1aDirectory)
+                let flow = try JSONSerialization.jsonObject(
+                    with: Data(contentsOf: Self.d1aDirectory.appendingPathComponent("describe_flow.json"))) as! [String: Any]
+                d1aQuestions = D1ADecider.questions(from: flow["questions"] as! [String: Any], order: ["redundant", "vague"])
+            }
+            let decider = d1a!, questions = d1aQuestions
+            let state = D1ADecider.render([("previous description", previous ?? "(none)"), ("new description", new)])
+            let container = try await _load(modelId: currentModelId)
+            let probs = try await container.perform { context -> [[Float]] in
+                guard let gemma = context.model as? Gemma4 else { return [] }
+                return try decider.decide(state: state, questions: questions, gemma: gemma, tokenizer: context.tokenizer)
+            }
+            guard probs.count == questions.count else { return nil }
+            return Dictionary(uniqueKeysWithValues: zip(questions.map(\.id), probs.map { $0[1] }))
+        } catch {
+            Self.log("d1a decide FAILED: \(String(describing: error))")
+            return nil
+        }
+    }
+
     public func unload() {
         loadState = .idle
         isLoaded = false
@@ -276,6 +317,24 @@ class VLMService {
         else { return }
         line.append(0x0A)
         let url = docs.appendingPathComponent("descriptions.jsonl")
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile(); h.write(line); try? h.close()
+        } else {
+            try? line.write(to: url)
+        }
+        debugExcludeFromBackup(url)
+    }
+
+    /// Every D1A decision with its inputs, for calibrating the thresholds on real captures.
+    nonisolated static func debugAppendDecision(previous: String?, new: String, redundant: Float, vague: Float, action: String) {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+              var line = try? JSONSerialization.data(withJSONObject: [
+                  "ts": ISO8601DateFormatter().string(from: Date()), "previous": previous ?? NSNull(), "new": new,
+                  "p_redundant": redundant, "p_vague": vague, "action": action,
+              ])
+        else { return }
+        line.append(0x0A)
+        let url = docs.appendingPathComponent("d1a_decisions.jsonl")
         if let h = try? FileHandle(forWritingTo: url) {
             h.seekToEndOfFile(); h.write(line); try? h.close()
         } else {

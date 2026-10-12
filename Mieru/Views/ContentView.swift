@@ -39,6 +39,9 @@ struct ContentView: View {
 
     /// Tracks the generation to discard stale results.
     @State private var generation = 0
+    /// D1A speak / skip / re-capture after each description (needs the adapter in Documents/d1a/adapter).
+    @AppStorage("d1aEnabled") private var d1aEnabled = false
+    @State private var lastSpokenDescription: String?
     #if DEBUG
     /// The camera restarts on every foreground, re-firing onChange(isRunning); run the harness once.
     @State private var debugHarnessStarted = false
@@ -299,7 +302,7 @@ struct ContentView: View {
 
     // MARK: - Capture & Describe
 
-    private func captureAndDescribe() {
+    private func captureAndDescribe(isRecapture: Bool = false) {
         guard let frame = cameraManager.latestFrame else { return }
 
         // Load model on first use (or wake from idle unload), then auto-capture.
@@ -309,7 +312,7 @@ struct ContentView: View {
                 isIdle = false
                 await vlmService.load()
                 await loadActiveTTS()   // idle may have unloaded the voice too
-                captureAndDescribe()
+                captureAndDescribe(isRecapture: isRecapture)
             }
             return
         }
@@ -329,8 +332,37 @@ struct ContentView: View {
             let result = await vlmService.describe(pixelBuffer: frame, language: language)
 
             guard currentGen == generation else { return }
-            isThinking = false
             if result.isEmpty { VLMService.log("describe returned empty text") }
+
+            // D1A, when installed and on: re-capture a vague description once, and stay quiet when
+            // it repeats the last spoken one. When unsure, speak — a wrong skip costs the listener
+            // information, a wrong speak only a few seconds.
+            if d1aEnabled, !result.isEmpty, !result.hasPrefix("VLM error"),
+               let p = await vlmService.decide(previous: lastSpokenDescription, new: result) {
+                guard currentGen == generation else { return }
+                let vague = p["vague"] ?? 0
+                let redundant = lastSpokenDescription == nil ? 0 : (p["redundant"] ?? 0)
+                let action = vague >= 0.6 && !isRecapture ? "recapture" : redundant >= 0.6 ? "skip" : "speak"
+                VLMService.log(String(format: "d1a: redundant=%.2f vague=%.2f -> %@", redundant, vague, action))
+                #if DEBUG
+                VLMService.debugAppendDecision(previous: lastSpokenDescription, new: result,
+                                               redundant: redundant, vague: vague, action: action)
+                #endif
+                if action == "recapture" {
+                    try? await Task.sleep(for: .milliseconds(800))
+                    guard currentGen == generation else { return }
+                    captureAndDescribe(isRecapture: true)
+                    return
+                }
+                if action == "skip" {
+                    isThinking = false
+                    descriptionText = result
+                    resetIdleTimer()
+                    return
+                }
+            }
+            isThinking = false
+            lastSpokenDescription = result
 
             if voiceEnabled {
                 // Sync text with voice: show a "preparing voice" state, synthesize, and
@@ -398,6 +430,13 @@ struct ContentView: View {
         }
         if let v = value("-irodoriVoice"), let i = Int(v), IrodoriTTSService.voices.indices.contains(i) {
             irodoriService.selectedVoice = IrodoriTTSService.voices[i]
+        }
+        if args.contains("-d1a") { d1aEnabled = true }
+        if args.contains("-d1aFlow") {
+            speechService.unload()
+            irodoriService.unload()
+            await D1AProbe.runFlow(vlm: vlmService)
+            return
         }
         if args.contains("-d1aAdapter") {
             // D1A as an unmerged adapter on the resident Gemma: no second model to load.
