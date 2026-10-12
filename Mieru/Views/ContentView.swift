@@ -5,6 +5,7 @@
 //  Main view: full-screen camera with DQ text box overlay.
 //
 
+import CoreML
 import SwiftUI
 
 struct ContentView: View {
@@ -396,6 +397,17 @@ struct ContentView: View {
         }
         if let v = value("-irodoriVoice"), let i = Int(v), IrodoriTTSService.voices.indices.contains(i) {
             irodoriService.selectedVoice = IrodoriTTSService.voices[i]
+        }
+        if let units = value("-d1aProbe") {
+            // D1A runs as a separate model: free Gemma and the voices first, as the app would.
+            vlmService.unload()
+            speechService.unload()
+            irodoriService.unload()
+            for _ in 0..<50 where VLMService.footprintMB > 1500 { try? await Task.sleep(for: .milliseconds(100)) }
+            VLMService.log("d1a: start units=\(units) fp=\(VLMService.footprintMB)MB")
+            let map: [String: MLComputeUnits] = ["ane": .cpuAndNeuralEngine, "gpu": .cpuAndGPU, "cpu": .cpuOnly, "all": .all]
+            await D1AProbe.run(units: map[units] ?? .cpuAndNeuralEngine, label: units)
+            return
         }
         guard args.contains("-autoCapture") else { return }
 
