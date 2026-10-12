@@ -75,25 +75,26 @@ class ModelCatalog {
             estimatedSizeGB: 0.16
         ),
 
-        // TTS — Irodori (Japanese flow-matching DiT, MLX, VoiceDesign captions, 48 kHz)
-        ModelInfo(
-            id: "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit",
-            displayName: "Irodori-TTS 600M (JP)",
-            family: .other, kind: .tts,
-            architecture: "Irodori-TTS", modelType: "Irodori_MLXAudio",
-            format: .mlx,
-            contextLength: 0, batch: 1, chunks: 1,
-            estimatedSizeGB: 1.3
-        ),
-        // v4.1 MeanFlow distillation: 4 sampler steps without CFG, same captions and codec as v3.
+        // TTS — Irodori v4.1 MeanFlow (Japanese, MLX, VoiceDesign captions, 48 kHz): 4 sampler steps
+        // without CFG, same captions and codec as v3. The Irodori default.
         ModelInfo(
             id: "mlx-community/Irodori-TTS-v4.1-Small-MF-8bit",
-            displayName: "Irodori-TTS v4.1 MF (JP, fast)",
+            displayName: "Irodori-TTS v4.1 MF (JP)",
             family: .other, kind: .tts,
             architecture: "Irodori-TTS", modelType: "Irodori_MLXAudio",
             format: .mlx,
             contextLength: 0, batch: 1, chunks: 1,
             estimatedSizeGB: 1.5
+        ),
+        // Irodori v3 (40 steps with CFG), kept for comparison.
+        ModelInfo(
+            id: "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit",
+            displayName: "Irodori-TTS v3 600M (JP, legacy)",
+            family: .other, kind: .tts,
+            architecture: "Irodori-TTS", modelType: "Irodori_MLXAudio",
+            format: .mlx,
+            contextLength: 0, batch: 1, chunks: 1,
+            estimatedSizeGB: 1.3
         )
     ]
 
@@ -166,6 +167,12 @@ class ModelCatalog {
         }
         activeVLMId = UserDefaults.standard.string(forKey: activeVLMIdKey)
         activeTTSId = UserDefaults.standard.string(forKey: activeTTSIdKey)
+        if activeTTSId == "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit",
+           !UserDefaults.standard.bool(forKey: "mieru.irodoriV41Migrated") {
+            activeTTSId = "mlx-community/Irodori-TTS-v4.1-Small-MF-8bit"
+            UserDefaults.standard.set(activeTTSId, forKey: activeTTSIdKey)
+        }
+        UserDefaults.standard.set(true, forKey: "mieru.irodoriV41Migrated")
     }
 
     private func persistCustomModels() {
