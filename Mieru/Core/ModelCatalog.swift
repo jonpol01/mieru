@@ -86,6 +86,17 @@ class ModelCatalog {
             contextLength: 0, batch: 1, chunks: 1,
             estimatedSizeGB: 1.5
         ),
+        // Irodori v4.1 MeanFlow on Core ML (no MLX), streamed chunk by chunk. PoC: the compiled
+        // packages + tokenizer are pushed to Documents/irodori-coreml (see IrodoriCoreMLPipeline).
+        ModelInfo(
+            id: IrodoriCoreMLService.catalogId,
+            displayName: "Irodori-TTS v4.1 MF (Core ML)",
+            family: .other, kind: .tts,
+            architecture: "Irodori-TTS", modelType: "Irodori_CoreML",
+            format: .coreml,
+            contextLength: 0, batch: 1, chunks: 1,
+            estimatedSizeGB: 1.44
+        ),
         // Irodori v3 (40 steps with CFG), kept for comparison.
         ModelInfo(
             id: "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit",

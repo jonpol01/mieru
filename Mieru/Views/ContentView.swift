@@ -14,12 +14,14 @@ struct ContentView: View {
     @State private var vlmService = VLMService()
     @State private var speechService = SpeechService()        // Kokoro (CoreML / ANE)
     @State private var irodoriService = IrodoriTTSService()   // Irodori (MLX, JA VoiceDesign)
+    @State private var irodoriCoreMLService = IrodoriCoreMLService()   // Irodori v4.1 MF (Core ML, streamed)
     @State private var catalog = ModelCatalog.shared
 
     private static let irodoriIds: Set<String> = [IrodoriTTSService.v3Id, IrodoriTTSService.v41MeanFlowId]
 
     /// Whichever TTS engine the catalog has marked active.
     private var isIrodoriActive: Bool { Self.irodoriIds.contains(catalog.defaultTTSId) }
+    private var isIrodoriCoreMLActive: Bool { catalog.defaultTTSId == IrodoriCoreMLService.catalogId }
 
     @State private var descriptionText = ""
     @State private var isThinking = false
@@ -204,7 +206,8 @@ struct ContentView: View {
     }
 
     private var voiceRTF: Double {
-        isIrodoriActive ? irodoriService.lastRTF : speechService.lastRTF
+        isIrodoriActive ? irodoriService.lastRTF
+            : isIrodoriCoreMLActive ? irodoriCoreMLService.lastRTF : speechService.lastRTF
     }
 
     private func perfPill(icon: String, label: String, value: String) -> some View {
@@ -234,6 +237,8 @@ struct ContentView: View {
         if isIrodoriActive {
             irodoriService.select(modelId: catalog.defaultTTSId)
             await irodoriService.load()
+        } else if isIrodoriCoreMLActive {
+            await irodoriCoreMLService.load()
         } else {
             await speechService.load()
         }
@@ -243,15 +248,25 @@ struct ContentView: View {
     private func ttsSpeak(_ text: String) async {
         if isIrodoriActive {
             await irodoriService.speak(text, language: language)
+        } else if isIrodoriCoreMLActive {
+            await irodoriCoreMLService.speak(text, language: language)
         } else {
             await speechService.speak(text, language: language)
         }
     }
 
-    /// Stop both engines — cheap and avoids a stuck stream after an engine switch.
+    /// Stop every engine — cheap and avoids a stuck stream after an engine switch.
     private func ttsStop() {
         speechService.stop()
         irodoriService.stop()
+        irodoriCoreMLService.stop()
+    }
+
+    /// Release every TTS engine's weights.
+    private func ttsUnloadAll() {
+        speechService.unload()
+        irodoriService.unload()
+        irodoriCoreMLService.unload()
     }
 
     // MARK: - Model Activation
@@ -260,8 +275,7 @@ struct ContentView: View {
         // Free TTS weights before loading the (possibly large, e.g. QAT ~4.4 GB) VLM,
         // so the load peak doesn't collide with a resident TTS model → Jetsam.
         ttsStop()
-        speechService.unload()
-        irodoriService.unload()
+        ttsUnloadAll()
 
         let success = await vlmService.switchModel(to: modelId)
 
@@ -282,7 +296,7 @@ struct ContentView: View {
         await catalog.scanCache()
     }
 
-    /// Switch the active TTS engine: stop both, persist selection, unload the other,
+    /// Switch the active TTS engine: stop all, persist selection, unload the others,
     /// load the chosen one. Only one TTS engine is resident at a time.
     private func activateTTS(modelId: String) async {
         ttsStop()
@@ -291,10 +305,16 @@ struct ContentView: View {
 
         if Self.irodoriIds.contains(modelId) {
             speechService.unload()
+            irodoriCoreMLService.unload()
             irodoriService.select(modelId: modelId)
             await irodoriService.load()
+        } else if modelId == IrodoriCoreMLService.catalogId {
+            speechService.unload()
+            irodoriService.unload()
+            await irodoriCoreMLService.load()
         } else {
             irodoriService.unload()
+            irodoriCoreMLService.unload()
             await speechService.load()
         }
         await catalog.scanCache()
@@ -373,7 +393,8 @@ struct ContentView: View {
                 // (plus the camera) overflows the budget → Jetsam. The text is already
                 // produced, so free the brain before synthesizing; the next しらべる
                 // lazily reloads it. Kokoro (CoreML/ANE) is light — leave Gemma in.
-                if isIrodoriActive {
+                // Irodori on Core ML (~1.4 GB of packages) gets the same treatment.
+                if isIrodoriActive || isIrodoriCoreMLActive {
                     vlmService.unload()
                 }
                 isSynthesizing = true
@@ -407,7 +428,9 @@ struct ContentView: View {
     /// `devicectl … process launch John-Soliva.Mieru -- -voice irodori -irodoriVoice 2 -autoCapture 3`
     ///   -lang ja|en           response language
     ///   -vlm <hf model id>    switch the vision model first (e.g. the QAT repo)
-    ///   -voice kokoro|irodori|irodori4  enable voice with that engine (irodori4 = v4.1 MeanFlow)
+    ///   -voice kokoro|irodori|irodori4|irodoricoreml  enable voice with that engine (irodori4 = v4.1 MeanFlow,
+    ///                         irodoricoreml = the same model on Core ML)
+    ///   -irodoriCoreMLUnits gpu|ane  Core ML Irodori encoder/duration/decoder units (read by IrodoriCoreMLService)
     ///   -d1aProbe ane|gpu|cpu|all [-d1aVision]  D1A Core ML trunk (or vision encoder) check, see D1AProbe
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
     ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
@@ -424,24 +447,23 @@ struct ContentView: View {
         if let lang = value("-lang") { language = lang }
         if let vlm = value("-vlm") { await activateVLM(modelId: vlm) }
         if let voice = value("-voice") {
-            let ttsIds = ["irodori": IrodoriTTSService.v3Id, "irodori4": IrodoriTTSService.v41MeanFlowId]
+            let ttsIds = ["irodori": IrodoriTTSService.v3Id, "irodori4": IrodoriTTSService.v41MeanFlowId,
+                          "irodoricoreml": IrodoriCoreMLService.catalogId]
             await activateTTS(modelId: ttsIds[voice] ?? "aufklarer/Kokoro-82M-CoreML")
             voiceEnabled = true
         }
         if let v = value("-irodoriVoice"), let i = Int(v), IrodoriTTSService.voices.indices.contains(i) {
-            irodoriService.selectedVoice = IrodoriTTSService.voices[i]
+            irodoriService.selectedVoice = IrodoriTTSService.voices[i]   // also the Core ML engine's pick
         }
         if args.contains("-d1a") { d1aEnabled = true }
         if args.contains("-d1aFlow") {
-            speechService.unload()
-            irodoriService.unload()
+            ttsUnloadAll()
             await D1AProbe.runFlow(vlm: vlmService)
             return
         }
         if args.contains("-d1aAdapter") {
             // D1A as an unmerged adapter on the resident Gemma: no second model to load.
-            speechService.unload()
-            irodoriService.unload()
+            ttsUnloadAll()
             VLMService.log("d1a: adapter start fp=\(VLMService.footprintMB)MB")
             await D1AProbe.runAdapter(vlm: vlmService)
             return
@@ -449,8 +471,7 @@ struct ContentView: View {
         if let units = value("-d1aProbe") {
             // D1A runs as a separate model: free Gemma and the voices first, as the app would.
             vlmService.unload()
-            speechService.unload()
-            irodoriService.unload()
+            ttsUnloadAll()
             for _ in 0..<50 where VLMService.footprintMB > 1500 { try? await Task.sleep(for: .milliseconds(100)) }
             VLMService.log("d1a: start units=\(units) fp=\(VLMService.footprintMB)MB")
             let map: [String: MLComputeUnits] = ["ane": .cpuAndNeuralEngine, "gpu": .cpuAndGPU, "cpu": .cpuOnly, "all": .all]
@@ -467,7 +488,7 @@ struct ContentView: View {
         guard args.contains("-autoCapture") else { return }
 
         let cycles = Int(value("-autoCapture") ?? "") ?? 1
-        VLMService.log("debug: \(cycles) capture cycle(s) lang=\(language) voice=\(voiceEnabled ? (isIrodoriActive ? "irodori" : "kokoro") : "off") vlm=\(vlmService.currentModelId)")
+        VLMService.log("debug: \(cycles) capture cycle(s) lang=\(language) voice=\(voiceEnabled ? (isIrodoriActive ? "irodori" : isIrodoriCoreMLActive ? "irodoricoreml" : "kokoro") : "off") vlm=\(vlmService.currentModelId)")
         for cycle in 1...cycles {
             try? await Task.sleep(for: .seconds(3))
             VLMService.log("debug: cycle \(cycle)/\(cycles) start")
@@ -481,7 +502,7 @@ struct ContentView: View {
             for poll in 0..<480 {
                 try? await Task.sleep(for: .milliseconds(500))
                 let busy = isThinking || isSynthesizing || isTyping || vlmService.isDownloading
-                    || speechService.isSpeaking || irodoriService.isSpeaking
+                    || speechService.isSpeaking || irodoriService.isSpeaking || irodoriCoreMLService.isSpeaking
                 idlePolls = (!descriptionText.isEmpty && !busy) ? idlePolls + 1 : 0
                 if idlePolls >= 2 { break }
                 // A Gemma reload doesn't set isThinking, so only warn once the model is in.
@@ -507,16 +528,16 @@ struct ContentView: View {
 
     private func idleUnload() {
         // Never unload mid-activity — reschedule and try later.
-        guard !isThinking, !isSynthesizing, !isTyping,
-              !speechService.isSpeaking, !irodoriService.isSpeaking else {
+        guard !isThinking, !isSynthesizing, !isTyping, !speechService.isSpeaking,
+              !irodoriService.isSpeaking, !irodoriCoreMLService.isSpeaking else {
             resetIdleTimer()
             return
         }
-        guard vlmService.isLoaded || speechService.isLoaded || irodoriService.isLoaded else { return }
+        guard vlmService.isLoaded || speechService.isLoaded || irodoriService.isLoaded
+            || irodoriCoreMLService.isLoaded else { return }
 
         vlmService.unload()
-        speechService.unload()
-        irodoriService.unload()
+        ttsUnloadAll()
         isIdle = true
         VLMService.log("idle unload — models released after \(Int(idleTimeout))s")
     }
