@@ -307,6 +307,18 @@ class VLMService {
         return kr == KERN_SUCCESS ? Int(info.phys_footprint / (1024 * 1024)) : -1
     }
 
+    /// Peak physical footprint of the process so far (what jetsam counts), in MB.
+    nonisolated static var peakFootprintMB: Int {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return kr == KERN_SUCCESS ? Int(info.ledger_phys_footprint_peak / (1024 * 1024)) : -1
+    }
+
     /// Full description text, one JSON object per line, for building an offline eval set.
     nonisolated static func debugAppendDescription(_ text: String, language: String, modelId: String) {
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,

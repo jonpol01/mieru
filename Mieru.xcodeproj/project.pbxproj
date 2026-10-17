@@ -21,6 +21,7 @@
 		AA000029 /* IrodoriTTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100021 /* IrodoriTTSService.swift */; };
 		AA0000E1 /* IrodoriCoreMLService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000E1 /* IrodoriCoreMLService.swift */; };
 		AA0000E2 /* IrodoriCoreMLPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000E2 /* IrodoriCoreMLPipeline.swift */; };
+		AA0000E3 /* TTSBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000E3 /* TTSBench.swift */; };
 		AA000010 /* SiriEdgeGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100011 /* SiriEdgeGlow.swift */; };
 		AA000012 /* LanguageToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100013 /* LanguageToggle.swift */; };
 		AA000014 /* VoiceToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA100015 /* VoiceToggle.swift */; };
@@ -56,6 +57,7 @@
 		AA100021 /* IrodoriTTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IrodoriTTSService.swift; sourceTree = "<group>"; };
 		AA1000E1 /* IrodoriCoreMLService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IrodoriCoreMLService.swift; sourceTree = "<group>"; };
 		AA1000E2 /* IrodoriCoreMLPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IrodoriCoreMLPipeline.swift; sourceTree = "<group>"; };
+		AA1000E3 /* TTSBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSBench.swift; sourceTree = "<group>"; };
 		AA100009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AA100010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA100011 /* SiriEdgeGlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriEdgeGlow.swift; sourceTree = "<group>"; };
@@ -180,6 +182,7 @@
 				AA100021 /* IrodoriTTSService.swift */,
 				AA1000E1 /* IrodoriCoreMLService.swift */,
 				AA1000E2 /* IrodoriCoreMLPipeline.swift */,
+				AA1000E3 /* TTSBench.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -294,6 +297,7 @@
 				AA000029 /* IrodoriTTSService.swift in Sources */,
 				AA0000E1 /* IrodoriCoreMLService.swift in Sources */,
 				AA0000E2 /* IrodoriCoreMLPipeline.swift in Sources */,
+				AA0000E3 /* TTSBench.swift in Sources */,
 				AA000010 /* SiriEdgeGlow.swift in Sources */,
 				AA000012 /* LanguageToggle.swift in Sources */,
 				AA000014 /* VoiceToggle.swift in Sources */,

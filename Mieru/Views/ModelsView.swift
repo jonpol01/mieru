@@ -13,10 +13,9 @@ struct ModelsView: View {
     let vlmService: VLMService
     let speechService: SpeechService
     let irodoriService: IrodoriTTSService
+    let irodoriCoreMLService: IrodoriCoreMLService
     let onActivateVLM: (String) async -> Void
     let onActivateTTS: (String) async -> Void
-
-    private let irodoriId = "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit"
 
     @Environment(\.dismiss) private var dismiss
     @State private var catalog = ModelCatalog.shared
@@ -74,6 +73,7 @@ struct ModelsView: View {
                     vlmService: vlmService,
                     speechService: speechService,
                     irodoriService: irodoriService,
+                    irodoriCoreMLService: irodoriCoreMLService,
                     onActivateVLM: onActivateVLM,
                     onActivateTTS: onActivateTTS
                 )
@@ -329,7 +329,7 @@ struct ModelsView: View {
         case .vlm:
             return vlmService.currentModelId == model.id && vlmService.isLoaded
         case .tts:
-            return model.id == irodoriId ? irodoriService.isLoaded : speechService.isLoaded
+            return ttsState(model).loaded
         case .stt:
             return false
         }
@@ -340,10 +340,14 @@ struct ModelsView: View {
         case .vlm:
             return vlmService.currentModelId == model.id && vlmService.isDownloading
         case .tts:
-            return model.id == irodoriId ? irodoriService.isLoading : speechService.isLoading
+            return ttsState(model).loading
         case .stt:
             return false
         }
+    }
+
+    private func ttsState(_ model: ModelInfo) -> TTSLoadState {
+        TTSLoadState(model.id, speech: speechService, irodori: irodoriService, irodoriCoreML: irodoriCoreMLService)
     }
 
     private func loadingStatus(for model: ModelInfo) -> String {
@@ -351,9 +355,35 @@ struct ModelsView: View {
         case .vlm:
             return vlmService.statusMessage
         case .tts:
-            return model.id == irodoriId ? irodoriService.statusMessage : speechService.statusMessage
+            return ttsState(model).status
         case .stt:
             return ""
+        }
+    }
+}
+
+/// Load state of a TTS catalog entry on the engine that runs it: Kokoro, Irodori on MLX (v3 / v4.1-MF,
+/// one checkpoint resident at a time) or Irodori on Core ML.
+struct TTSLoadState {
+    let loaded: Bool
+    let loading: Bool
+    let status: String
+
+    @MainActor
+    init(_ id: String, speech: SpeechService, irodori: IrodoriTTSService, irodoriCoreML: IrodoriCoreMLService) {
+        if id == IrodoriCoreMLService.catalogId {
+            loaded = irodoriCoreML.isLoaded
+            loading = irodoriCoreML.isLoading
+            status = irodoriCoreML.statusMessage
+        } else if IrodoriTTSService.modelIds.contains(id) {
+            let current = irodori.modelId == id
+            loaded = current && irodori.isLoaded
+            loading = current && irodori.isLoading
+            status = current ? irodori.statusMessage : ""
+        } else {
+            loaded = speech.isLoaded
+            loading = speech.isLoading
+            status = speech.statusMessage
         }
     }
 }

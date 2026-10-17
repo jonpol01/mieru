@@ -40,6 +40,9 @@ class IrodoriTTSService {
         "低く落ち着いた渋い男性の声",
     ]
 
+    /// Used until a voice is picked (John's choice): 「優しく穏やかな女性の声」. Shared with the Core ML engine.
+    static var defaultVoice: String { voices[2] }
+
     var availableVoices: [String] { Self.voices }
 
     /// Selected VoiceDesign caption (persisted).
@@ -49,6 +52,8 @@ class IrodoriTTSService {
 
     static let v3Id = "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit"
     static let v41MeanFlowId = "mlx-community/Irodori-TTS-v4.1-Small-MF-8bit"
+    /// Catalog ids this (MLX) engine runs. The Core ML entry is IrodoriCoreMLService.catalogId.
+    static let modelIds: Set<String> = [v3Id, v41MeanFlowId]
 
     /// Which Irodori checkpoint to load (both take the same VoiceDesign captions).
     private(set) var modelId = IrodoriTTSService.v3Id
@@ -135,11 +140,11 @@ class IrodoriTTSService {
         }
 
         // Irodori is a Japanese-only model: no language routing, and the "voice" is a
-        // VoiceDesign caption. Default to the first preset so it matches the picker top.
-        let voice = selectedVoice ?? Self.voices.first
+        // VoiceDesign caption; the picker shows defaultVoice checked until one is picked.
+        let voice = selectedVoice ?? Self.defaultVoice
         let capturedModel = model
         MLX.Memory.clearCache()
-        Self.log("synth start len=\(cleanText.count) voice=\(voice ?? "nil") — active=\(Self.activeMB)MB")
+        Self.log("synth start len=\(cleanText.count) voice=\(voice) — active=\(Self.activeMB)MB")
 
         do {
             // Whole-utterance generate (flow-matching) on a background task.
@@ -274,6 +279,26 @@ extension IrodoriTTSService {
 
 #if DEBUG
 extension IrodoriTTSService {
+    /// Synth-only twin of speak() for the TTS benchmark: same text rules and generate call, audio returned
+    /// instead of played. The model does not stream, so the whole call is the time to first audio.
+    func debugSynthesize(_ text: String) async throws -> (samples: [Float], rate: Double, phases: [String: Double]) {
+        guard let model else { throw TTSBenchError("MLX Irodori not loaded") }
+        let cleanText = trimToCompleteSentences(text)
+        guard containsJapanese(cleanText) else { throw TTSBenchError("skipped: no Japanese script in text") }
+        let voice = selectedVoice ?? Self.defaultVoice
+        MLX.Memory.clearCache()
+        let samples: [Float] = try await Task.detached {
+            try await model.generate(text: cleanText, voice: voice, refAudio: nil, refText: nil, language: nil)
+                .asArray(Float.self)
+        }.value
+        var phases: [String: Double] = [:]
+        if let t = (model as? IrodoriTTSModel)?.lastTimings {
+            phases = ["encode": t.encode, "duration": t.duration, "sampler": t.sampler, "decode": t.decode,
+                      "frames": Double(t.latentFrames)]
+        }
+        return (samples, sampleRate, phases)
+    }
+
     /// Writes synthesized audio to Documents/tts_dumps/<tag>_<time>.wav (16-bit PCM mono)
     /// so a remote test can pull it off the device and check it isn't silent or truncated.
     nonisolated static func debugDumpWAV(samples: [Float], rate: Double, tag: String) {

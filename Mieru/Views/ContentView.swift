@@ -17,11 +17,16 @@ struct ContentView: View {
     @State private var irodoriCoreMLService = IrodoriCoreMLService()   // Irodori v4.1 MF (Core ML, streamed)
     @State private var catalog = ModelCatalog.shared
 
-    private static let irodoriIds: Set<String> = [IrodoriTTSService.v3Id, IrodoriTTSService.v41MeanFlowId]
-
     /// Whichever TTS engine the catalog has marked active.
-    private var isIrodoriActive: Bool { Self.irodoriIds.contains(catalog.defaultTTSId) }
+    private var isIrodoriActive: Bool { IrodoriTTSService.modelIds.contains(catalog.defaultTTSId) }
     private var isIrodoriCoreMLActive: Bool { catalog.defaultTTSId == IrodoriCoreMLService.catalogId }
+
+    /// Core ML Irodori is selected but its side-loaded files are missing or failed to load: the MLX
+    /// v4.1-MF engine speaks instead. The selection is kept, so pushing the files restores Core ML.
+    @State private var irodoriCoreMLFallback = false
+    /// The engine that actually speaks.
+    private var speaksIrodoriCoreML: Bool { isIrodoriCoreMLActive && !irodoriCoreMLFallback }
+    private var speaksIrodoriMLX: Bool { isIrodoriActive || (isIrodoriCoreMLActive && irodoriCoreMLFallback) }
 
     @State private var descriptionText = ""
     @State private var isThinking = false
@@ -146,10 +151,18 @@ struct ContentView: View {
         .onChange(of: cameraManager.isRunning) { _, running in
             if running {
                 Task {
-                    // Use the catalog's active selection (persisted across launches)
-                    vlmService.currentModelId = catalog.defaultVLMId
-                    await vlmService.load()
-                    await loadActiveTTS()
+                    #if DEBUG
+                    // -ttsBench times cold loads: start with neither Gemma nor a voice resident.
+                    let skipModelLoad = ProcessInfo.processInfo.arguments.contains("-ttsBench")
+                    #else
+                    let skipModelLoad = false
+                    #endif
+                    if !skipModelLoad {
+                        // Use the catalog's active selection (persisted across launches)
+                        vlmService.currentModelId = catalog.defaultVLMId
+                        await vlmService.load()
+                        await loadActiveTTS()
+                    }
                     await catalog.scanCache()
                     resetIdleTimer()
                     #if DEBUG
@@ -173,6 +186,7 @@ struct ContentView: View {
                 vlmService: vlmService,
                 speechService: speechService,
                 irodoriService: irodoriService,
+                irodoriCoreMLService: irodoriCoreMLService,
                 onActivateVLM: { modelId in
                     await activateVLM(modelId: modelId)
                 },
@@ -206,8 +220,8 @@ struct ContentView: View {
     }
 
     private var voiceRTF: Double {
-        isIrodoriActive ? irodoriService.lastRTF
-            : isIrodoriCoreMLActive ? irodoriCoreMLService.lastRTF : speechService.lastRTF
+        speaksIrodoriMLX ? irodoriService.lastRTF
+            : speaksIrodoriCoreML ? irodoriCoreMLService.lastRTF : speechService.lastRTF
     }
 
     private func perfPill(icon: String, label: String, value: String) -> some View {
@@ -238,17 +252,34 @@ struct ContentView: View {
             irodoriService.select(modelId: catalog.defaultTTSId)
             await irodoriService.load()
         } else if isIrodoriCoreMLActive {
-            await irodoriCoreMLService.load()
+            // After a failed Core ML load, reloads (wake, Gemma swaps) go straight to the MLX fallback;
+            // Core ML is retried on the next launch or when it is picked again in the Models sheet.
+            if irodoriCoreMLFallback { await irodoriService.load() } else { await loadIrodoriCoreML() }
         } else {
             await speechService.load()
         }
     }
 
+    /// Core ML Irodori, or the MLX v4.1-MF engine when the Core ML files are missing or fail to load
+    /// (there is no in-app download for them).
+    private func loadIrodoriCoreML() async {
+        await irodoriCoreMLService.load()
+        while irodoriCoreMLService.isLoading { try? await Task.sleep(for: .milliseconds(100)) }   // a concurrent load
+        irodoriCoreMLFallback = !irodoriCoreMLService.isLoaded
+        if irodoriCoreMLFallback {
+            IrodoriTTSService.log("coreml unavailable (\(irodoriCoreMLService.statusMessage)) — falling back to MLX v4.1-MF")
+            irodoriService.select(modelId: IrodoriTTSService.v41MeanFlowId)
+            await irodoriService.load()
+        } else {
+            irodoriService.unload()
+        }
+    }
+
     /// Synthesize + start playback on the active engine. Returns when audio begins.
     private func ttsSpeak(_ text: String) async {
-        if isIrodoriActive {
+        if speaksIrodoriMLX {
             await irodoriService.speak(text, language: language)
-        } else if isIrodoriCoreMLActive {
+        } else if speaksIrodoriCoreML {
             await irodoriCoreMLService.speak(text, language: language)
         } else {
             await speechService.speak(text, language: language)
@@ -303,7 +334,7 @@ struct ContentView: View {
         guard let model = catalog.model(id: modelId) else { return }
         catalog.setActiveTTS(model)
 
-        if Self.irodoriIds.contains(modelId) {
+        if IrodoriTTSService.modelIds.contains(modelId) {
             speechService.unload()
             irodoriCoreMLService.unload()
             irodoriService.select(modelId: modelId)
@@ -311,7 +342,7 @@ struct ContentView: View {
         } else if modelId == IrodoriCoreMLService.catalogId {
             speechService.unload()
             irodoriService.unload()
-            await irodoriCoreMLService.load()
+            await loadIrodoriCoreML()
         } else {
             irodoriService.unload()
             irodoriCoreMLService.unload()
@@ -434,6 +465,8 @@ struct ContentView: View {
     ///   -d1aProbe ane|gpu|cpu|all [-d1aVision]  D1A Core ML trunk (or vision encoder) check, see D1AProbe
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
     ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
+    ///   -ttsBench coreml-gpu,coreml-ane,mlx [-benchRuns N] [-benchSustainMinutes M]  synthesis-only Irodori
+    ///                         benchmark (camera + Gemma freed) → Documents/tts_bench.jsonl, see TTSBench
     private func runDebugLaunchArguments() async {
         guard !debugHarnessStarted else { return }
         debugHarnessStarted = true
@@ -485,10 +518,24 @@ struct ContentView: View {
             }
             return
         }
+        if let engines = value("-ttsBench") {
+            // Synthesis only: free the camera, Gemma and the voices first, as for -d1aProbe, and keep the
+            // idle unload from firing mid-run.
+            idleTimer?.invalidate()
+            cameraManager.stop()
+            vlmService.unload()
+            ttsUnloadAll()
+            for _ in 0..<50 where VLMService.footprintMB > 1500 { try? await Task.sleep(for: .milliseconds(100)) }
+            await TTSBench.run(engines: engines.split(separator: ",").map(String.init),
+                               runs: Int(value("-benchRuns") ?? "") ?? 3,
+                               sustainMinutes: Double(value("-benchSustainMinutes") ?? "") ?? 0,
+                               coreML: irodoriCoreMLService, mlx: irodoriService)
+            return
+        }
         guard args.contains("-autoCapture") else { return }
 
         let cycles = Int(value("-autoCapture") ?? "") ?? 1
-        VLMService.log("debug: \(cycles) capture cycle(s) lang=\(language) voice=\(voiceEnabled ? (isIrodoriActive ? "irodori" : isIrodoriCoreMLActive ? "irodoricoreml" : "kokoro") : "off") vlm=\(vlmService.currentModelId)")
+        VLMService.log("debug: \(cycles) capture cycle(s) lang=\(language) voice=\(voiceEnabled ? (speaksIrodoriMLX ? "irodori" : speaksIrodoriCoreML ? "irodoricoreml" : "kokoro") : "off") vlm=\(vlmService.currentModelId)")
         for cycle in 1...cycles {
             try? await Task.sleep(for: .seconds(3))
             VLMService.log("debug: cycle \(cycle)/\(cycles) start")

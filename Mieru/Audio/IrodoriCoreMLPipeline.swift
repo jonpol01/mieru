@@ -45,6 +45,7 @@ struct IrodoriCoreMLTimings: Sendable {
     var firstAudio = 0.0    // synth start → first chunk handed to playback
     var frames = 0
     var segments = 0
+    var tokens = 0          // text tokens synthesized (BOS included per segment)
 }
 
 final class IrodoriCoreMLPipeline: @unchecked Sendable {
@@ -261,6 +262,7 @@ final class IrodoriCoreMLPipeline: @unchecked Sendable {
             }
             T.frames += frames
             T.segments += 1
+            T.tokens += n
 
             // MeanFlow sampler: text state sliced to n tokens, zero-padded to 128; noise for `frames`, zeros after.
             let S = Self.bucket(Self.ditBuckets, frames)

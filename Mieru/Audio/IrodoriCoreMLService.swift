@@ -142,7 +142,7 @@ class IrodoriCoreMLService {
             return
         }
 
-        let caption = selectedVoice ?? Self.voices.first ?? ""
+        let caption = selectedVoice ?? IrodoriTTSService.defaultVoice
         synthDone = false
         pendingBuffers = 0
         emittedSamples = 0
@@ -270,6 +270,29 @@ class IrodoriCoreMLService {
         isSpeaking = false
     }
 }
+
+#if DEBUG
+extension IrodoriCoreMLService {
+    /// Synth-only twin of speak() for the TTS benchmark: same text rules and pipeline, with the emitted chunks
+    /// collected instead of played. Timings come from the pipeline (firstAudio = synth start → first chunk).
+    func debugSynthesize(_ text: String) async throws -> (samples: [Float], timings: IrodoriCoreMLTimings) {
+        guard let pipeline else { throw TTSBenchError("Core ML Irodori not loaded") }
+        let cleanText = trimToCompleteSentences(text)
+        guard containsJapanese(cleanText) else { throw TTSBenchError("skipped: no Japanese script in text") }
+        let sink = SampleSink()
+        let t = try await pipeline.synthesize(cleanText, caption: selectedVoice ?? IrodoriTTSService.defaultVoice) {
+            await sink.append($0)
+            return true
+        }
+        return (await sink.samples, t)
+    }
+}
+
+private actor SampleSink {
+    var samples: [Float] = []
+    func append(_ chunk: [Float]) { samples += chunk }
+}
+#endif
 
 // MARK: - Text Processing (same rules as IrodoriTTSService)
 

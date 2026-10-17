@@ -13,6 +13,7 @@ struct ModelDetailView: View {
     let vlmService: VLMService
     let speechService: SpeechService
     let irodoriService: IrodoriTTSService
+    let irodoriCoreMLService: IrodoriCoreMLService
     let onActivateVLM: (String) async -> Void
     let onActivateTTS: (String) async -> Void
 
@@ -20,15 +21,20 @@ struct ModelDetailView: View {
     @State private var catalog = ModelCatalog.shared
     @State private var isActivating = false
 
-    private let irodoriId = "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit"
-    private var isIrodori: Bool { model.id == irodoriId }
+    /// Any Irodori entry (MLX or Core ML): they share the VoiceDesign voice setting.
+    private var isIrodori: Bool {
+        IrodoriTTSService.modelIds.contains(model.id) || model.id == IrodoriCoreMLService.catalogId
+    }
+    private var ttsState: TTSLoadState {
+        TTSLoadState(model.id, speech: speechService, irodori: irodoriService, irodoriCoreML: irodoriCoreMLService)
+    }
 
     private var isActive: Bool {
         switch model.kind {
         case .vlm:
             return vlmService.currentModelId == model.id && vlmService.isLoaded
         case .tts:
-            return isIrodori ? irodoriService.isLoaded : speechService.isLoaded
+            return ttsState.loaded
         case .stt:
             return false
         }
@@ -43,7 +49,7 @@ struct ModelDetailView: View {
         case .vlm:
             return vlmService.currentModelId == model.id && vlmService.isDownloading
         case .tts:
-            return isIrodori ? irodoriService.isLoading : speechService.isLoading
+            return ttsState.loading
         case .stt:
             return false
         }
@@ -262,7 +268,7 @@ struct ModelDetailView: View {
                                 .foregroundColor(.white)
                                 .multilineTextAlignment(.leading)
                             Spacer()
-                            if (irodoriService.selectedVoice ?? IrodoriTTSService.voices.first) == caption {
+                            if (irodoriService.selectedVoice ?? IrodoriTTSService.defaultVoice) == caption {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundColor(.green)
                             } else {
@@ -340,7 +346,7 @@ struct ModelDetailView: View {
         switch model.kind {
         case .vlm: return vlmService.statusMessage.isEmpty ? "Loading…" : vlmService.statusMessage
         case .tts:
-            let msg = isIrodori ? irodoriService.statusMessage : speechService.statusMessage
+            let msg = ttsState.status
             return msg.isEmpty ? "Loading…" : msg
         case .stt: return "Loading…"
         }

@@ -23,18 +23,6 @@ enum D1AProbe {
 
     private static func now() -> Double { CFAbsoluteTimeGetCurrent() }
 
-    /// Peak physical footprint of the process so far (what jetsam counts), in MB.
-    private static var peakFootprintMB: Int {
-        var info = task_vm_info_data_t()
-        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
-        let kr = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
-            }
-        }
-        return kr == KERN_SUCCESS ? Int(info.ledger_phys_footprint_peak / (1024 * 1024)) : -1
-    }
-
     private static func array(_ url: URL, _ shape: [Int], _ type: MLMultiArrayDataType) throws -> MLMultiArray {
         let data = try Data(contentsOf: url)
         let a = try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: type)
@@ -163,7 +151,7 @@ enum D1AProbe {
                 let s = times.sorted()
                 return String(format: "adapter DONE: load %.2fs | %d requests, %d questions | p50 %.3fs p95 %.3fs first %.3fs | vs Mac adapter: %d top changes (%d clear-cut), max|dp| %.3f | adapter off max|dh| %g | fp=%dMB peak=%dMB",
                               loadSeconds, times.count, questions, s[s.count / 2], s[min(s.count - 1, s.count * 95 / 100)],
-                              times.first ?? 0, flips, clearFlips, maxDp, offDiff, VLMService.footprintMB, peakFootprintMB)
+                              times.first ?? 0, flips, clearFlips, maxDp, offDiff, VLMService.footprintMB, VLMService.peakFootprintMB)
             }
             log(summary)
         } catch {
@@ -213,7 +201,7 @@ enum D1AProbe {
             }
             let s = times.sorted()
             log(String(format: "vision DONE (%@): median %.0f ms/image, fp=%dMB peak=%dMB",
-                       label, s[s.count / 2] * 1000, VLMService.footprintMB, peakFootprintMB))
+                       label, s[s.count / 2] * 1000, VLMService.footprintMB, VLMService.peakFootprintMB))
         } catch {
             log("vision FAILED (\(label)): \(String(describing: error))")
         }
@@ -238,7 +226,7 @@ enum D1AProbe {
                 log(String(format: "load %@ %.1fs fp=%dMB", name, now() - t, VLMService.footprintMB))
             }
             log(String(format: "loaded 5 chunks (%@) in %.1fs, fp=%dMB peak=%dMB",
-                       label, now() - tLoad, VLMService.footprintMB, peakFootprintMB))
+                       label, now() - tLoad, VLMService.footprintMB, VLMService.peakFootprintMB))
 
             // Pointer head: z = (Wk h_opt + bk) . (Wq h_decide + bq) / sqrt(dp), softmax(z / T).
             let headCfg = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("head.json"))) as! [String: Any]
@@ -359,7 +347,7 @@ enum D1AProbe {
             let s = times.sorted()
             log(String(format: "DONE %@ (%@): %d requests, %d questions | p50 %.2fs p95 %.2fs first %.2fs | vs %@: %d top changes (%d clear-cut), max|dp| %.3f | peak fp=%dMB thermal=%d",
                        label, feedsDir, times.count, questions, s[s.count / 2], s[min(s.count - 1, s.count * 95 / 100)], times.first ?? 0,
-                       reference, flips, clearFlips, maxDp, peakFootprintMB, ProcessInfo.processInfo.thermalState.rawValue))
+                       reference, flips, clearFlips, maxDp, VLMService.peakFootprintMB, ProcessInfo.processInfo.thermalState.rawValue))
         } catch {
             log("FAILED (\(label)): \(String(describing: error))")
         }

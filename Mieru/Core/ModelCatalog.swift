@@ -75,19 +75,10 @@ class ModelCatalog {
             estimatedSizeGB: 0.16
         ),
 
-        // TTS — Irodori v4.1 MeanFlow (Japanese, MLX, VoiceDesign captions, 48 kHz): 4 sampler steps
-        // without CFG, same captions and codec as v3. The Irodori default.
-        ModelInfo(
-            id: "mlx-community/Irodori-TTS-v4.1-Small-MF-8bit",
-            displayName: "Irodori-TTS v4.1 MF (JP)",
-            family: .other, kind: .tts,
-            architecture: "Irodori-TTS", modelType: "Irodori_MLXAudio",
-            format: .mlx,
-            contextLength: 0, batch: 1, chunks: 1,
-            estimatedSizeGB: 1.5
-        ),
-        // Irodori v4.1 MeanFlow on Core ML (no MLX), streamed chunk by chunk. PoC: the compiled
-        // packages + tokenizer are pushed to Documents/irodori-coreml (see IrodoriCoreMLPipeline).
+        // TTS — Irodori v4.1 MeanFlow (Japanese, VoiceDesign captions, 48 kHz) on Core ML, streamed chunk
+        // by chunk. The Irodori default. The compiled packages + tokenizer are side-loaded into
+        // Documents/irodori-coreml (see IrodoriCoreMLPipeline); without them the app speaks with the MLX
+        // entry below instead.
         ModelInfo(
             id: IrodoriCoreMLService.catalogId,
             displayName: "Irodori-TTS v4.1 MF (Core ML)",
@@ -96,6 +87,17 @@ class ModelCatalog {
             format: .coreml,
             contextLength: 0, batch: 1, chunks: 1,
             estimatedSizeGB: 1.44
+        ),
+        // The same model on MLX (4 sampler steps without CFG, same captions and codec as v3): downloads
+        // from Hugging Face, and is the fallback when the Core ML files are missing or fail to load.
+        ModelInfo(
+            id: "mlx-community/Irodori-TTS-v4.1-Small-MF-8bit",
+            displayName: "Irodori-TTS v4.1 MF (JP, MLX fallback)",
+            family: .other, kind: .tts,
+            architecture: "Irodori-TTS", modelType: "Irodori_MLXAudio",
+            format: .mlx,
+            contextLength: 0, batch: 1, chunks: 1,
+            estimatedSizeGB: 1.5
         ),
         // Irodori v3 (40 steps with CFG), kept for comparison.
         ModelInfo(
@@ -184,6 +186,13 @@ class ModelCatalog {
             UserDefaults.standard.set(activeTTSId, forKey: activeTTSIdKey)
         }
         UserDefaults.standard.set(true, forKey: "mieru.irodoriV41Migrated")
+        // v4.1-MF MLX → the same model on Core ML, once (ContentView falls back to MLX without its files).
+        if activeTTSId == "mlx-community/Irodori-TTS-v4.1-Small-MF-8bit",
+           !UserDefaults.standard.bool(forKey: "mieru.irodoriCoreMLMigrated") {
+            activeTTSId = IrodoriCoreMLService.catalogId
+            UserDefaults.standard.set(activeTTSId, forKey: activeTTSIdKey)
+        }
+        UserDefaults.standard.set(true, forKey: "mieru.irodoriCoreMLMigrated")
     }
 
     private func persistCustomModels() {
