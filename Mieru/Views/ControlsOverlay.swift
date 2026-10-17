@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ControlsOverlay: View {
     let isModelReady: Bool
+    let isModelLoading: Bool
     let isProcessing: Bool
     let isAutoMode: Bool
     let statusMessage: String
@@ -56,7 +57,8 @@ struct ControlsOverlay: View {
                     .padding(5)
             )
         }
-        .opacity(isModelReady ? 1.0 : 0.7)
+        .disabled(isModelLoading)
+        .opacity(isModelLoading ? 0.4 : (isModelReady ? 1.0 : 0.7))
     }
 
     // MARK: - DQ Cancel Button

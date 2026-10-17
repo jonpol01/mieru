@@ -1,0 +1,278 @@
+//
+//  SpeechService.swift
+//  Mieru
+//
+//  On-device neural TTS using Kokoro-82M via CoreML/Neural Engine.
+//
+
+import AVFoundation
+import CoreML
+import KokoroTTS
+import AudioCommon
+
+@Observable
+@MainActor
+class SpeechService {
+
+    var isSpeaking = false
+    var isEnabled = true
+    var isLoaded = false
+    var isLoading = false
+    var statusMessage = ""
+
+    /// Last synthesis perf — for the perf HUD.
+    var lastSynthSeconds: Double = 0
+    var lastAudioSeconds: Double = 0
+    var lastRTF: Double = 0   // realtime factor = audio / synth (higher = faster)
+
+    private var model: KokoroTTSModel?
+    private var audioEngine: AVAudioEngine?
+    private var playerNode: AVAudioPlayerNode?
+
+    /// Monotonic token — bumped on every speak()/stop(); stale work bails.
+    private var playToken = 0
+
+    private let sampleRate: Double = 24000
+
+    func load() async {
+        guard !isLoaded, !isLoading else { return }
+        isLoading = true
+        statusMessage = "Loading Kokoro TTS…"
+
+        do {
+            let cacheDir = try HuggingFaceDownloader.getCacheDirectory(
+                for: KokoroTTSModel.defaultModelId)
+            await predownloadVoice("jf_alpha", to: cacheDir)
+
+            // CPU + Neural Engine only: a GPU fallback would share the Metal queue
+            // MLX owns for Gemma / Irodori.
+            let tts = try await KokoroTTSModel.fromPretrained(
+                voice: "af_heart",
+                computeUnits: .cpuAndNeuralEngine
+            ) { [weak self] progress, status in
+                Task { @MainActor in
+                    self?.statusMessage = "TTS: \(status)"
+                }
+            }
+
+            NSLog("[TTS] Available voices: %@", tts.availableVoices.joined(separator: ", "))
+            model = tts
+            isLoaded = true
+            statusMessage = ""
+        } catch {
+            statusMessage = "TTS error: \(error.localizedDescription)"
+            NSLog("[TTS] Load error: %@", error.localizedDescription)
+        }
+        isLoading = false
+    }
+
+    private func predownloadVoice(_ voiceName: String, to cacheDir: URL) async {
+        let voiceFile = cacheDir.appendingPathComponent("voices/\(voiceName).json")
+        if FileManager.default.fileExists(atPath: voiceFile.path) { return }
+
+        let urlString = "https://huggingface.co/\(KokoroTTSModel.defaultModelId)/resolve/main/voices/\(voiceName).json"
+        guard let url = URL(string: urlString) else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            try FileManager.default.createDirectory(
+                at: voiceFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: voiceFile)
+            NSLog("[TTS] Downloaded voice: %@", voiceName)
+        } catch {
+            NSLog("[TTS] Failed to download voice %@: %@", voiceName, error.localizedDescription)
+        }
+    }
+
+    /// Synthesize, then start playback. **Returns the instant audio begins** (or on
+    /// failure) — so the caller can reveal the on-screen text in sync with the voice.
+    func speak(_ text: String, language: String = "ja") async {
+        guard isEnabled, !text.isEmpty, let model else { return }
+
+        stop()
+        let myToken = playToken
+        isSpeaking = true
+
+        let voice = language == "ja"
+            ? (model.availableVoices.contains("jf_alpha") ? "jf_alpha" : "af_heart")
+            : "af_heart"
+        let lang = language == "ja" ? "ja" : "en"
+        let capturedModel = model
+
+        let cleanText = trimToCompleteSentences(text)
+        guard !cleanText.isEmpty else { isSpeaking = false; return }
+
+        do {
+            let t0 = CFAbsoluteTimeGetCurrent()
+            let samples: [Float] = try await Task.detached {
+                let sentences = splitForKokoro(cleanText)
+                var all = [Float]()
+                for sentence in sentences {
+                    let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { continue }
+                    let smp = try capturedModel.synthesize(
+                        text: trimmed, voice: voice, language: lang, speed: 1.0)
+                    all.append(contentsOf: smp)
+                }
+                return all
+            }.value
+            let synth = CFAbsoluteTimeGetCurrent() - t0
+            lastSynthSeconds = synth
+            lastAudioSeconds = Double(samples.count) / sampleRate
+            lastRTF = synth > 0 ? lastAudioSeconds / synth : 0
+            VLMService.log("kokoro synth OK \(samples.count) samples in \(String(format: "%.2f", synth))s (RTF \(String(format: "%.2f", lastRTF))) voice=\(voice)")
+            #if DEBUG
+            IrodoriTTSService.debugDumpWAV(samples: samples, rate: sampleRate, tag: "kokoro")
+            #endif
+
+            guard myToken == playToken else { return }   // cancelled mid-synth
+            playAudio(samples: samples, token: myToken)
+        } catch {
+            NSLog("[TTS] Synthesis error: %@", error.localizedDescription)
+            if myToken == playToken { isSpeaking = false }
+        }
+    }
+
+    func stop() {
+        playToken &+= 1
+        playerNode?.stop()
+        if let engine = audioEngine, engine.isRunning {
+            engine.stop()
+        }
+        audioEngine = nil
+        playerNode = nil
+        isSpeaking = false
+    }
+
+    private func playAudio(samples: [Float], token: Int) {
+        guard token == playToken else { return }
+        guard !samples.isEmpty else { isSpeaking = false; return }
+
+        playerNode?.stop()
+        audioEngine?.stop()
+        audioEngine = nil
+        playerNode = nil
+
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else { isSpeaking = false; return }
+
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(samples.count)
+        ) else { isSpeaking = false; return }
+
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        let channelData = buffer.floatChannelData![0]
+        for i in 0..<samples.count {
+            channelData[i] = samples[i]
+        }
+
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+
+            let engine = AVAudioEngine()
+            let player = AVAudioPlayerNode()
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: format)
+            try engine.start()
+
+            player.scheduleBuffer(buffer) { [weak self] in
+                Task { @MainActor in
+                    guard let self, token == self.playToken else { return }
+                    self.isSpeaking = false
+                }
+            }
+            player.play()
+            VLMService.log("kokoro playback started \(String(format: "%.1f", Double(samples.count) / sampleRate))s audio")
+
+            self.audioEngine = engine
+            self.playerNode = player
+        } catch {
+            NSLog("[TTS] Playback error: %@", error.localizedDescription)
+            isSpeaking = false
+        }
+    }
+
+    func unload() {
+        stop()
+        model = nil
+        isLoaded = false
+    }
+}
+
+// MARK: - Text Processing
+
+/// Remove trailing incomplete sentence (no ending punctuation).
+private func trimToCompleteSentences(_ text: String) -> String {
+    let endings: [Character] = ["。", "！", "？", ".", "!", "?"]
+    // Find the last sentence-ending punctuation
+    if let lastIdx = text.lastIndex(where: { endings.contains($0) }) {
+        return String(text[...lastIdx])
+    }
+    // No sentence endings found — return full text as-is
+    return text
+}
+
+/// Split text into short chunks that stay under Kokoro's 128 phoneme token limit.
+/// Japanese chars map to ~3 phoneme tokens each, so max ~35 chars per chunk.
+private func splitForKokoro(_ text: String, maxChars: Int = 35) -> [String] {
+    // Step 1: Split on sentence endings and clause markers
+    let pattern = "(?<=[。！？、，\\.!?,;:])\\s*"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else {
+        return breakLongChunk(text, maxChars: maxChars)
+    }
+
+    let range = NSRange(text.startIndex..., in: text)
+    var rawChunks = [String]()
+    var lastEnd = text.startIndex
+
+    regex.enumerateMatches(in: text, range: range) { match, _, _ in
+        guard let matchRange = match?.range, let swiftRange = Range(matchRange, in: text) else { return }
+        rawChunks.append(String(text[lastEnd..<swiftRange.upperBound]))
+        lastEnd = swiftRange.upperBound
+    }
+    if lastEnd < text.endIndex {
+        rawChunks.append(String(text[lastEnd...]))
+    }
+
+    // Step 2: Break any chunk that's still too long
+    var result = [String]()
+    for chunk in rawChunks {
+        let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= maxChars {
+            result.append(trimmed)
+        } else {
+            result.append(contentsOf: breakLongChunk(trimmed, maxChars: maxChars))
+        }
+    }
+
+    return result.filter { !$0.isEmpty }
+}
+
+/// Break a long chunk into pieces at particle/space boundaries.
+private func breakLongChunk(_ text: String, maxChars: Int) -> [String] {
+    guard text.count > maxChars else { return [text] }
+
+    // Japanese particles and natural break points
+    let breakChars: Set<Character> = ["は", "が", "を", "に", "で", "と", "の", "へ", "も", "か", "ら", " ", "　"]
+    var chunks = [String]()
+    var current = ""
+
+    for char in text {
+        current.append(char)
+        if current.count >= maxChars, breakChars.contains(char) {
+            chunks.append(current)
+            current = ""
+        }
+    }
+    if !current.isEmpty {
+        chunks.append(current)
+    }
+
+    return chunks
+}

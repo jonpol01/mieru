@@ -15,8 +15,14 @@ struct DQTextBoxView: View {
     /// Whether we're waiting for the AI to respond.
     let isThinking: Bool
 
+    /// Whether the voice is being synthesized (text ready, audio not yet started).
+    var isSynthesizing: Bool = false
+
     /// Whether typewriter is still revealing text.
     @Binding var isTyping: Bool
+
+    /// When true, skip blip SFX (voice is playing instead).
+    var voiceMode: Bool = false
 
     /// Called when the typewriter finishes revealing all text.
     var onComplete: (() -> Void)?
@@ -38,7 +44,7 @@ struct DQTextBoxView: View {
     // MARK: - Body
 
     var body: some View {
-        if !text.isEmpty || isThinking {
+        if !text.isEmpty || isThinking || isSynthesizing {
             ZStack {
                 // DQ double-border box
                 RoundedRectangle(cornerRadius: 12)
@@ -60,6 +66,8 @@ struct DQTextBoxView: View {
                             VStack(alignment: .leading, spacing: 0) {
                                 if isThinking {
                                     thinkingView
+                                } else if isSynthesizing {
+                                    synthesizingView
                                 } else {
                                     typewriterText
                                 }
@@ -85,7 +93,7 @@ struct DQTextBoxView: View {
             .frame(maxHeight: 180)
             .padding(.horizontal, 16)
             .transition(.move(edge: .bottom).combined(with: .opacity))
-            .animation(.easeOut(duration: 0.3), value: text.isEmpty && !isThinking)
+            .animation(.easeOut(duration: 0.3), value: text.isEmpty && !isThinking && !isSynthesizing)
             .onChange(of: text) { _, newText in
                 startTypewriter(for: newText)
             }
@@ -106,6 +114,34 @@ struct DQTextBoxView: View {
                     .fill(Color.white)
                     .frame(width: 8, height: 8)
                     .offset(y: slimeFrame == i ? -6 : 0)
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .onAppear {
+            Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    slimeFrame = (slimeFrame + 1) % 3
+                }
+            }
+        }
+    }
+
+    /// "Preparing voice" indicator — speaker icon + bouncing dots while TTS synthesizes.
+    private var synthesizingView: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "speaker.wave.2.fill")
+                .font(.system(size: 16))
+                .foregroundColor(.white)
+                .symbolEffect(.variableColor.iterative, options: .repeating)
+
+            HStack(spacing: 6) {
+                ForEach(0..<3, id: \.self) { i in
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 8, height: 8)
+                        .offset(y: slimeFrame == i ? -6 : 0)
+                }
             }
         }
         .padding(.vertical, 8)
@@ -164,7 +200,7 @@ struct DQTextBoxView: View {
 
             let idx = newText.index(newText.startIndex, offsetBy: revealedCount - 1)
             let char = newText[idx]
-            if !char.isWhitespace {
+            if !voiceMode && !char.isWhitespace {
                 sfx.playBlip()
             }
         }

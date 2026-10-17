@@ -4,17 +4,17 @@
 
 # Mieru
 
-### On-device camera AI that identifies what you see — powered by Gemma 4 on iPhone.
+### On-device camera AI that sees, decides, and speaks: Gemma 4, D1A and Irodori TTS on iPhone.
 
-**見える** (mieru) — *"to see / to be visible"*
+**見える** (mieru): *"to see / to be visible"*
 
 <br>
 
-[![Swift](https://img.shields.io/badge/Swift-5.0-F05138?style=for-the-badge&logo=swift&logoColor=white)](https://swift.org)
-[![iOS](https://img.shields.io/badge/iOS-17.0+-000000?style=for-the-badge&logo=apple&logoColor=white)](https://developer.apple.com/ios/)
+[![Swift](https://img.shields.io/badge/Swift-6-F05138?style=for-the-badge&logo=swift&logoColor=white)](https://swift.org)
+[![iOS](https://img.shields.io/badge/iOS-18.0+-000000?style=for-the-badge&logo=apple&logoColor=white)](https://developer.apple.com/ios/)
 [![MLX](https://img.shields.io/badge/MLX_Swift-On--Device_AI-333333?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-swift)
+[![Core ML](https://img.shields.io/badge/Core_ML-GPU_TTS-34C759?style=for-the-badge&logo=apple&logoColor=white)](https://developer.apple.com/documentation/coreml)
 [![Gemma](https://img.shields.io/badge/Gemma_4-E2B--4bit-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit)
-[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 <br>
 
@@ -24,184 +24,193 @@
 
 ## Overview
 
-Mieru is an iPhone app that uses the camera and an on-device vision-language model (Gemma 4 E2B) to identify whatever you point it at. It names brands, products, people, places, and objects directly — no cloud, no API keys, everything runs on the device GPU via Metal.
+Mieru is an iPhone app for describing the world out loud. Point the camera at something and tap 「しらべる」.
+1. **Gemma 4 E2B**, an on-device vision-language model, says what it sees: brands, products, text, places and objects.
+2. **D1A**, a small decision model on top of the same Gemma, decides whether the description is worth speaking.
+3. **Irodori TTS** reads it aloud in natural Japanese.
 
-The UI is inspired by Dragon Quest text boxes with typewriter animation, blip sound effects, and a Siri-style edge glow while the AI is thinking.
+Everything runs on the phone, with no cloud and no API keys.
+
+The UI is inspired by Dragon Quest text boxes: a typewriter reveal synced to the voice, blip sound effects, and a Siri-style edge glow while the AI is thinking.
 
 ---
 
 ## Pipeline
 
 ```
-iPhone Camera → AVCaptureSession (~10 FPS throttle)
-                    │
-                    ├──→ CameraPreviewView (live feed)
-                    │
-                    └──→ User taps「しらべる」
-                              │
-                              ├──→ Capture latest CVPixelBuffer
-                              │
-                              ├──→ Downscale to 512px
-                              │
-                              ├──→ Gemma 4 E2B (4-bit, MLX Swift, GPU via Metal)
-                              │         │
-                              │         ├──→ System prompt (EN or JA)
-                              │         └──→ "What is this?" / "これは何？"
-                              │
-                              └──→ DQ Text Box (typewriter + blip SFX)
-                                        │
-                                        ├──→ Auto-scroll during typing
-                                        ├──→ ▼ cursor blink when done
-                                        └──→「キャンセル」to abort
+Camera (AVCaptureSession, ~10 FPS) ──► tap「しらべる」or auto mode
+      │
+      ▼
+Gemma 4 E2B VLM (MLX, GPU) ── 512 px frame + EN/JA prompt ──► description
+      │
+      ▼
+D1A (optional, off by default): the same resident Gemma with D1A's LoRA switched on
+      ├── vague?      → re-capture once
+      ├── redundant?  → show the text, stay quiet
+      └── otherwise   → speak
+      │
+      ▼
+TTS: Irodori v4.1-MF on Core ML (default), Irodori on MLX, or Kokoro
+      │
+      ▼
+DQ text box: typewriter revealed in sync with the voice
 ```
 
 ---
 
 ## Features
 
-### On-Device AI
-- **Gemma 4 E2B 4-bit** via MLX Swift — runs entirely on iPhone GPU (Metal)
-- **No cloud dependency** — no API keys, no internet needed after model download
-- **Sequential loading** — camera starts first, model loads after to avoid OOM
-- **Lazy fallback** — if model isn't loaded at capture time, triggers load + auto-capture
-- **~1.5 GB model** downloaded from HuggingFace on first launch (cached locally)
+### Vision: Gemma 4 E2B
+- `mlx-community/gemma-4-e2b-it-4bit` through MLX Swift (`MLXVLM`) on the GPU.
+- It loads through the VLM factory explicitly. The generic loader can fall back to text-only and drop the vision tower without telling you.
+- A model catalog lets you switch VLMs, for example to the QAT 4-bit variant.
+
+### Voice
+| Engine | Runtime | Notes |
+|---|---|---|
+| **Irodori-TTS v4.1-MF (Core ML)**, the default Irodori | Core ML, GPU | Japanese VoiceDesign. First audio ≈ 0.9 s; 12.5 s of speech in ≈ 1.8 s. Streams in 5 s chunks. |
+| Irodori-TTS v4.1-MF (MLX) | MLX, GPU | Fallback when the Core ML files aren't installed. 12–14 s of speech in 3.8–4.9 s. |
+| Irodori-TTS v3 (MLX) | MLX, GPU | Legacy. 40 steps with CFG, so it's slow. |
+| Kokoro-82M | Core ML, Neural Engine | Light. English and Japanese. The app-wide default voice. |
+
+- **VoiceDesign captions** pick the speaker. The default is voice 2, 「優しく穏やかな女性の声」. Captions are shared by both Irodori engines.
+- **Japanese-only check:** Irodori skips text with no Japanese script, since Gemma occasionally answers in English. The text still shows.
+
+### D1A decisions (optional)
+- D1A-E2B-it's **unmerged LoRA** is switched on over the resident Gemma only for the decision pass. Hidden states are read through a pointer head. No second model is loaded, and it adds about 25 MB.
+- **Two questions** from `describe_flow.json`: *redundant* (same as the last spoken description?) and *vague* (useless to a blind listener?). That's about 0.5 s per decision.
+- **Policy:**
+  - re-capture once if p(vague) ≥ 0.6;
+  - stay quiet if p(redundant) ≥ 0.6 and there is a previous description;
+  - otherwise speak, and speak whenever unsure.
+- Off by default (`d1aEnabled`). The adapter is side-loaded into `Documents/d1a/adapter/`.
 
 ### Dragon Quest UI
-- **DQ text box** — double-bordered box with typewriter text reveal
-- **Blip SFX** — procedurally generated 8-bit square wave blip (660Hz, 60ms) per character
-- **しらべる / キャンセル** — DQ-style action buttons with blinking ▶ cursor
-- **Bouncing dots** — animated thinking indicator while AI processes
-- **▼ triangle cursor** — blinks when text is fully revealed
-- **Siri edge glow** — animated gradient border pulses while thinking
+- Double-bordered text box with a typewriter reveal and procedurally generated 8-bit blips.
+- 「しらべる」/「キャンセル」 buttons with a blinking ▶, bouncing thinking dots and a ▼ cursor.
+- Siri-style edge glow while thinking.
+- EN / JA toggle, voice toggle, and a performance HUD (tok/s and voice RTF).
 
-### Language Toggle
-- **EN / JA** toggle in top-right corner
-- Switches both system prompt and user prompt
-- JA: direct identification in Japanese
-- EN: direct identification in English
-
-### Smart UX
-- **Auto-scroll** — text box scrolls as typewriter types
-- **Scroll pause** — scrolling pauses when user drags up to read
-- **Scroll resume** — resumes auto-scroll when user drags back to bottom
-- **Cancel** — stops typewriter, clears text, discards pending AI result
-- **Generation tracking** — stale results from cancelled requests are silently discarded
+### Power and memory
+- Models load after the camera starts and unload after 120 s idle; a tap wakes them.
+- Gemma is unloaded before Irodori synthesizes and reloads lazily.
+- One TTS engine is resident at a time.
 
 ---
 
-## Architecture
+## Measured on iPhone 17 Pro (iOS 27)
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                     Mieru App                             │
-│                                                           │
-│  ┌─────────────┐  ┌─────────────┐  ┌──────────────────┐ │
-│  │ ContentView  │  │ CameraManager│  │ VLMService       │ │
-│  │ Main layout  │  │ AVCapture    │  │ Gemma 4 E2B      │ │
-│  │ State mgmt   │  │ Frame grab   │  │ MLX Swift        │ │
-│  │ Lifecycle    │  │ 10 FPS cap   │  │ HuggingFace DL   │ │
-│  └──────┬──────┘  └──────────────┘  └──────────────────┘ │
-│         │                                                  │
-│  ┌──────┴──────┐  ┌─────────────┐  ┌──────────────────┐ │
-│  │ DQTextBoxView│  │ControlsOverlay│ │ SiriEdgeGlow    │ │
-│  │ Typewriter   │  │ しらべる btn │  │ Animated border  │ │
-│  │ Auto-scroll  │  │ キャンセル   │  │ Angular gradient │ │
-│  │ Blip SFX     │  │ Lang toggle  │  │ Pulse + rotate   │ │
-│  └──────────────┘  └─────────────┘  └──────────────────┘ │
-└──────────────────────────────────────────────────────────┘
-```
+| | Result |
+|---|---|
+| Gemma 4 E2B describe | 28–42 tok/s; ~4.0 GB MLX memory resident |
+| Irodori Core ML (GPU), warm | first audio 0.89 s; 12.5 s of speech synthesized in 1.8 s |
+| Irodori MLX v4.1-MF | 12–14 s of speech in 3.8–4.9 s, before any audio |
+| D1A decision (adapter on the resident Gemma) | ~0.5 s; 0/42 answer flips vs the Mac reference |
+| Kokoro (Neural Engine) | RTF ≈ 8–9 |
 
 ---
 
-## Key Files
+## Key files
 
 | File | Purpose |
-|------|---------|
-| `ContentView.swift` | Main view: camera + text box + controls layout, capture flow, lifecycle |
-| `CameraManager.swift` | AVCaptureSession wrapper, frame delivery at ~10 FPS, start/stop |
-| `VLMService.swift` | Gemma 4 E2B via MLX — download, load, inference with EN/JA prompts |
-| `DQTextBoxView.swift` | DQ text box with typewriter animation, auto-scroll, bouncing dots |
-| `ControlsOverlay.swift` | しらべる / キャンセル buttons with DQ styling |
-| `LanguageToggle.swift` | EN/JA toggle button |
-| `SiriEdgeGlow.swift` | Animated edge glow with angular gradient rotation and pulse |
-| `TypewriterSFX.swift` | Procedural 8-bit blip generator (square wave WAV in memory) |
-| `CameraPreviewView.swift` | UIViewRepresentable wrapper for AVCaptureVideoPreviewLayer |
+|---|---|
+| `Views/ContentView.swift` | Layout, the capture → describe → decide → speak flow, lifecycle, TTS dispatch, DEBUG launch args |
+| `AI/VLMService.swift` | Gemma 4 load, describe, D1A `decide(previous:new:)` |
+| `AI/D1ADecider.swift` | D1A request rendering and encoding, adapter on/off, pointer head |
+| `Audio/IrodoriCoreMLPipeline.swift` | Core ML Irodori: tokenizer, encoder → duration → 4 MeanFlow DiT steps → chunked decoder |
+| `Audio/IrodoriCoreMLService.swift` | Core ML engine service with streaming playback |
+| `Audio/IrodoriTTSService.swift` | MLX Irodori engine (v3 / v4.1-MF) |
+| `Audio/SpeechService.swift` | Kokoro (Core ML, Neural Engine) |
+| `Audio/TTSBench.swift` | DEBUG TTS benchmark (Core ML GPU/ANE vs MLX) |
+| `Core/ModelCatalog.swift` | VLM and TTS catalog, active selection, migrations |
+| `Camera/CameraManager.swift` | AVCaptureSession, frame delivery at ~10 FPS |
+| `Views/DQTextBoxView.swift`, `ControlsOverlay.swift`, `SiriEdgeGlow.swift` | Dragon Quest UI |
 
 ---
 
-## Model
+## Dependencies
 
-| Property | Value |
-|----------|-------|
-| **Model** | [gemma-4-e2b-it-4bit](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) |
-| **Architecture** | Gemma 4 (Vision-Language Model) |
-| **Quantization** | 4-bit (MLX format) |
-| **Size** | ~1.5 GB |
-| **Compute** | GPU via Metal (MLX Swift) |
-| **Framework** | [mlx-swift](https://github.com/ml-explore/mlx-swift) 0.30.6+ |
-| **VLM Support** | [mlx-swift-lm](https://github.com/adrgrondin/mlx-swift-lm) (port/gemma-4-model branch) |
-| **Tokenizer** | [swift-transformers](https://github.com/huggingface/swift-transformers) 1.0.0+ |
-| **Hub** | [swift-huggingface](https://github.com/huggingface/swift-huggingface.git) 0.9.0+ |
-| **Cache limit** | 20 MB GPU cache (minimizes resident memory) |
-| **Temperature** | 0.6 |
-| **Max tokens** | 150 |
+| Package | Pin | Why |
+|---|---|---|
+| [mlx-swift](https://github.com/ml-explore/mlx-swift) | 0.32.3 | MLX runtime |
+| [mlx-swift-lm](https://github.com/jonpol01/mlx-swift-lm) (fork) | `gemma4-vlm-hidden-states` | 3.32.3 plus a Gemma 4 VLM hidden-state SPI for D1A. Upstream PR pending. |
+| [mlx-audio-swift](https://github.com/jonpol01/mlx-audio-swift) (fork) | `irodori-v4` | Irodori v4.1 / MeanFlow Swift port. Upstream: [Blaizzy/mlx-audio-swift#284](https://github.com/Blaizzy/mlx-audio-swift/pull/284). |
+| [speech-swift](https://github.com/soniqo/speech-swift) | `f8f079cc` | Kokoro Core ML |
+| [swift-transformers](https://github.com/huggingface/swift-transformers) | 1.3.5 | Tokenizers (1.3.3+ fixes BPE on Unicode scalars) |
 
-> **Note:** The mlx-swift-lm fork requires a one-time patch — add `import Tokenizers` to `Gemma4.swift` in the SPM checkout until the fork merges the fix.
+The Core ML Irodori packages are built by `export_v4_coreml.py` on branch `coreml-export-v4` of [jonpol01/Irodori-TTS](https://github.com/jonpol01/Irodori-TTS).
 
 ---
 
 ## Requirements
 
-- **iPhone** with iOS 17.0+ and at least 8 GB RAM
-- **Xcode 16+**
-- `increased-memory-limit` entitlement (included)
-- ~1.5 GB storage for model (downloaded on first launch)
-- Must be launched **from home screen** (not Xcode debugger) to avoid OOM from debugger overhead
+- An iPhone with iOS 18+. Tested on an iPhone 17 Pro with iOS 27.
+- Xcode 27.1, with the Metal Toolchain installed:
+  ```bash
+  xcodebuild -downloadComponent MetalToolchain
+  ```
+- The `increased-memory-limit` and `extended-virtual-addressing` entitlements (included).
+- Several GB of free storage for models.
 
 ---
 
 ## Setup
 
-### 1. Clone
-
 ```bash
 git clone https://github.com/jonpol01/mieru.git
 cd mieru
+open Mieru.xcodeproj
 ```
 
-### 2. Patch SPM dependency
+Set your own signing team and bundle id, then build to a physical device; it needs the camera and the GPU. Gemma, Kokoro and MLX Irodori download from Hugging Face on first use.
 
-After Xcode resolves packages, add `import Tokenizers` to the top of:
+### Side-loaded models (for now)
 
+The Core ML Irodori packages and the D1A adapter aren't downloaded by the app yet; their repos are private. Without the Core ML files, Mieru falls back to MLX Irodori automatically. To install them, copy the folders into the app container:
+
+```bash
+xcrun devicectl device copy to --device <UDID> --domain-type appDataContainer \
+  --domain-identifier <bundle id> --source irodori-coreml --destination Documents/irodori-coreml
 ```
-DerivedData/Mieru-*/SourcePackages/checkouts/mlx-swift-lm/Libraries/MLXVLM/Models/Gemma4.swift
-```
 
-### 3. Build and run
-
-Build on a **physical device** (needs camera + Metal GPU). The model downloads from HuggingFace on first launch — progress is shown in the status bar.
-
-> **Important:** Launch from the home screen, not Xcode's debugger, to get the full memory budget.
+| Folder | Contents |
+|---|---|
+| `Documents/irodori-coreml/` | `irodori4_{encoder,duration,dit,decoder_w128}.mlpackage` and `tokenizer/`, compiled on the device on first load |
+| `Documents/d1a/adapter/` | `adapters.safetensors`, `adapter_config.json`, `head.safetensors`, `d1a_config.json`, `layout.json`, `describe_flow.json` |
 
 ---
 
-## Memory Management
+## Debug launch arguments (Debug builds)
 
-Running a VLM on iPhone requires careful memory handling:
+Pass them after `--` with `xcrun devicectl device process launch … -- <args>`.
 
-| Strategy | Detail |
-|----------|--------|
-| **Sequential loading** | Camera starts first, model loads only after `isRunning == true` |
-| **Lazy fallback** | If model isn't ready at capture time, loads then auto-captures |
-| **20 MB GPU cache** | Keeps Metal cache small to reduce resident memory |
-| **Background unload** | Model fully unloaded when app backgrounds (`MLX.GPU.clearCache()`) |
-| **Increased memory entitlement** | `com.apple.developer.kernel.increased-memory-limit` in entitlements |
-| **No debugger** | Must launch from home screen — debugger adds ~200 MB overhead |
+| Argument | Effect |
+|---|---|
+| `-lang ja\|en` | Response language |
+| `-vlm <hf id>` | Switch the vision model |
+| `-voice kokoro\|irodori\|irodori4\|irodoricoreml` | Pick the TTS engine |
+| `-irodoriVoice <0-5>` | Pick a VoiceDesign caption |
+| `-irodoriCoreMLUnits gpu\|ane` | Compute units for the Core ML Irodori encoder, duration and decoder (the DiT is always GPU) |
+| `-autoCapture [N]` | Run N unattended capture → describe → speak cycles |
+| `-d1a` | Turn on D1A decisions |
+| `-d1aFlow` | Run the describe_flow probe cases through D1A |
+| `-ttsBench <engines>` | TTS benchmark. See `Audio/TTSBench.swift` for engines and options; results go to `Documents/tts_bench.jsonl`. |
+
+Debug builds write `vlm.log`, `irodori.log`, `descriptions.jsonl`, `d1a_decisions.jsonl` and WAV dumps to `Documents/`, excluded from backup. Release builds only `NSLog`.
 
 ---
+
+## Credits
+
+- **Gemma 4:** Google.
+- **MLX:** Apple.
+- **Irodori-TTS:** [Aratako](https://huggingface.co/Aratako) (MIT). The Python MLX v4 / MeanFlow port is by [@yoshphys](https://github.com/yoshphys) in [Blaizzy/mlx-audio](https://github.com/Blaizzy/mlx-audio).
+- **Semantic-DACVAE-Japanese:** Aratako (MIT, based on Meta's DACVAE).
+- **ModernBERT-ja:** SB Intuitions (MIT).
+- **Kokoro-82M:** hexgrad; Core ML build by soniqo.
 
 <div align="center">
 
-**Built with Swift, MLX, and Gemma 4 on iPhone GPU**
+**Built with Swift, MLX and Core ML on iPhone**
 
 </div>
