@@ -12,7 +12,7 @@
 //      irodori4_encoder.mlmodelc     functions L32 L64 L128 L256 (only L128 is loaded)
 //      irodori4_duration.mlmodelc
 //      irodori4_dit.mlmodelc         functions s64 s128 s192 s256 s384 (only s384 is loaded)
-//      irodori4_decoder.mlmodelc
+//      irodori4_decoder_w128.mlmodelc   static width 128 (the enumerated build crashed on the iPhone GPU)
 //      tokenizer/tokenizer.json
 //      tokenizer/tokenizer_config.json   (ModernBERT-ja, from mlx-community/Irodori-TTS-v4.1-Small-MF-8bit)
 //  A .mlpackage pushed in place of a .mlmodelc is compiled on the device once and kept as .mlmodelc.
@@ -59,7 +59,7 @@ final class IrodoriCoreMLPipeline: @unchecked Sendable {
     static let captionLen = 64
     static let dim = 512
     static let latentDim = 32
-    static let decoderWidths = [64, 128]
+    static let decoderWidths = [128]   // static-width decoder; a short last chunk is zero-padded
     static let decoderOverlap = 8
     static let hop = 1920
     static let sampleRate = 48000.0
@@ -114,7 +114,7 @@ final class IrodoriCoreMLPipeline: @unchecked Sendable {
         let duration = try await model("irodori4_duration", nil, units)
         var dits: [Int: MLModel] = [:]
         for s in ditBuckets { dits[s] = try await model("irodori4_dit", "s\(s)", .cpuAndGPU) }
-        let decoder = try await model("irodori4_decoder", nil, units)
+        let decoder = try await model("irodori4_decoder_w128", nil, units)
 
         let p = IrodoriCoreMLPipeline(encoders: encoders, duration: duration, dits: dits, decoder: decoder,
                                       tokenizer: tokenizer)

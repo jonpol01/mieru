@@ -78,9 +78,9 @@ class IrodoriCoreMLService {
         commonFormat: .pcmFormatFloat32, sampleRate: IrodoriCoreMLPipeline.sampleRate, channels: 1, interleaved: false)
 
     init() {
-        // ANE by default: on the iPhone the decoder's enumerated-width build crashes on the GPU, and the
-        // decoder on the ANE next to an encoder on the GPU never finished loading. The DiT is always GPU.
-        var units = Units(rawValue: UserDefaults.standard.string(forKey: "irodoriCoreMLUnits") ?? "") ?? .ane
+        // GPU by default: the static-width decoder runs there (~0.23 s per chunk on an M1 Max GPU vs ~5 s
+        // on its ANE). The DiT is always GPU.
+        var units = Units(rawValue: UserDefaults.standard.string(forKey: "irodoriCoreMLUnits") ?? "") ?? .gpu
         #if DEBUG
         // -irodoriCoreMLUnits gpu|ane, to compare the two on the phone.
         let args = ProcessInfo.processInfo.arguments
