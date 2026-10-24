@@ -58,6 +58,22 @@ DQ text box: typewriter revealed in sync with the voice
 
 ---
 
+## Models
+
+| Role | Model | Runtime | How it gets onto the phone |
+|---|---|---|---|
+| Vision (describe) | [Gemma 4 E2B-it 4-bit](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) | MLX, GPU | Downloaded from Hugging Face on first use |
+| Decision (speak or not) | D1A-E2B-it: a LoRA plus a pointer head on that same Gemma | MLX, GPU | Side-loaded (see below) |
+| Voice, Irodori default | Irodori-TTS v4.1-MF, converted to Core ML | Core ML, GPU | Side-loaded (see below) |
+| Voice, Irodori fallback | [Irodori-TTS v4.1-MF 8-bit](https://huggingface.co/mlx-community/Irodori-TTS-v4.1-Small-MF-8bit) | MLX, GPU | Downloaded from Hugging Face |
+| Voice, app-wide default | [Kokoro-82M](https://huggingface.co/aufklarer/Kokoro-82M-CoreML) | Core ML, Neural Engine | Downloaded from Hugging Face |
+
+Gemma and D1A share one copy of the model in memory. D1A's adapter is switched on only for the decision pass, so the decision adds about 25 MB instead of a second model.
+
+D1A's public Hugging Face releases (for example [JohnP1/d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) are in PEFT format or have the adapter merged into the weights. The app needs the unmerged MLX adapter bundle listed under [Side-loaded models](#side-loaded-models-for-now), which isn't published yet.
+
+---
+
 ## Features
 
 ### Vision: Gemma 4 E2B
@@ -68,8 +84,8 @@ DQ text box: typewriter revealed in sync with the voice
 ### Voice
 | Engine | Runtime | Notes |
 |---|---|---|
-| **Irodori-TTS v4.1-MF (Core ML)**, the default Irodori | Core ML, GPU | Japanese VoiceDesign. First audio ≈ 0.9 s; 12.5 s of speech in ≈ 1.8 s. Streams in 5 s chunks. |
-| Irodori-TTS v4.1-MF (MLX) | MLX, GPU | Fallback when the Core ML files aren't installed. 12–14 s of speech in 3.8–4.9 s. |
+| **Irodori-TTS v4.1-MF (Core ML)**, the default Irodori | Core ML, GPU | Japanese VoiceDesign. First audio in 0.70 s (median); 6.6× real time. Streams in 5 s chunks. |
+| Irodori-TTS v4.1-MF (MLX) | MLX, GPU | Used when the Core ML files are missing or fail to load. First audio in 3.1 s; 2.7× real time. |
 | Irodori-TTS v3 (MLX) | MLX, GPU | Legacy. 40 steps with CFG, so it's slow. |
 | Kokoro-82M | Core ML, Neural Engine | Light. English and Japanese. The app-wide default voice. |
 
@@ -103,10 +119,26 @@ DQ text box: typewriter revealed in sync with the voice
 | | Result |
 |---|---|
 | Gemma 4 E2B describe | 28–42 tok/s; ~4.0 GB MLX memory resident |
-| Irodori Core ML (GPU), warm | first audio 0.89 s; 12.5 s of speech synthesized in 1.8 s |
-| Irodori MLX v4.1-MF | 12–14 s of speech in 3.8–4.9 s, before any audio |
 | D1A decision (adapter on the resident Gemma) | ~0.5 s; 0/42 answer flips vs the Mac reference |
 | Kokoro (Neural Engine) | RTF ≈ 8–9 |
+
+### Irodori voice benchmark
+
+Run with `-ttsBench`, voice 2: 24 Japanese test texts × 3 runs per engine, then a 5-minute nonstop loop. No engine had an error.
+
+| | **Core ML, GPU** (default) | Core ML, Neural Engine | MLX |
+|---|---|---|---|
+| First audio, median / p95 | **0.70 / 0.82 s** | 3.27 / 3.41 s | 3.10 / 10.94 s (no streaming) |
+| Camera description (~8 s of audio), total | **1.07 s** | 6.25 s | 2.97 s |
+| Speed, median (× real time) | **6.6×** | 1.2× | 2.7× |
+| Long text (~44 s of audio) | **6.6 s, 6 segments** | 34.9 s | 10.9 s, cut off at 30 s of audio |
+| Memory while speaking | ~2.0 GB | ~4.1–4.3 GB | ~1.7 GB |
+| Load, cold / warm | 9.7 / 1.3 s | 63.8 / 42.2 s | 1.5 / 0.5 s |
+| 5 minutes nonstop | 135 texts, 5.5→6.8× real time, thermal "fair" | ~1.0× real time, thermal "serious" | thermal "serious" |
+
+- **The Neural Engine** is slower on every measure and uses about twice the memory, so it stays a debug option (`-irodoriCoreMLUnits ane`).
+- **MLX** cuts long text off at 30 s of audio ([#27](https://github.com/jonpol01/mieru/issues/27)).
+- The engines ran back to back, so MLX started on a phone already heated by the Neural Engine run.
 
 ---
 
@@ -166,7 +198,7 @@ Set your own signing team and bundle id, then build to a physical device; it nee
 
 ### Side-loaded models (for now)
 
-The Core ML Irodori packages and the D1A adapter aren't downloaded by the app yet; their repos are private. Without the Core ML files, Mieru falls back to MLX Irodori automatically. To install them, copy the folders into the app container:
+The app doesn't download the Core ML Irodori packages or the D1A adapter yet. The Core ML repo is private, and the D1A adapter bundle isn't published. Without the Core ML files, Mieru falls back to MLX Irodori automatically. To install them, copy the folders into the app container:
 
 ```bash
 xcrun devicectl device copy to --device <UDID> --domain-type appDataContainer \
@@ -194,7 +226,9 @@ Pass them after `--` with `xcrun devicectl device process launch … -- <args>`.
 | `-autoCapture [N]` | Run N unattended capture → describe → speak cycles |
 | `-d1a` | Turn on D1A decisions |
 | `-d1aFlow` | Run the describe_flow probe cases through D1A |
-| `-ttsBench <engines>` | TTS benchmark. See `Audio/TTSBench.swift` for engines and options; results go to `Documents/tts_bench.jsonl`. |
+| `-d1aAdapter` | Check D1A's adapter on the resident Gemma against the Mac reference |
+| `-d1aProbe ane\|gpu\|cpu\|all [-d1aVision\|-d1aPhoto]` | Check D1A's Core ML build (trunk, vision encoder, or photo cases) on the chosen compute units |
+| `-ttsBench coreml-gpu,coreml-ane,mlx [-benchRuns N] [-benchSustainMinutes M]` | Irodori benchmark, synthesis only; results go to `Documents/tts_bench.jsonl` |
 
 Debug builds write `vlm.log`, `irodori.log`, `descriptions.jsonl`, `d1a_decisions.jsonl` and WAV dumps to `Documents/`, excluded from backup. Release builds only `NSLog`.
 
