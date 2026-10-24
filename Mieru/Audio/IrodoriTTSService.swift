@@ -40,7 +40,7 @@ class IrodoriTTSService {
         "低く落ち着いた渋い男性の声",
     ]
 
-    /// Used until a voice is picked (John's choice): 「優しく穏やかな女性の声」. Shared with the Core ML engine.
+    /// Used until a voice is picked: 「優しく穏やかな女性の声」. Shared with the Core ML engine.
     static var defaultVoice: String { voices[2] }
 
     var availableVoices: [String] { Self.voices }

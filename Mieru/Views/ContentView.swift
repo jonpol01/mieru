@@ -463,6 +463,7 @@ struct ContentView: View {
     ///                         irodoricoreml = the same model on Core ML)
     ///   -irodoriCoreMLUnits gpu|ane  Core ML Irodori encoder/duration/decoder units (read by IrodoriCoreMLService)
     ///   -d1aProbe ane|gpu|cpu|all [-d1aVision]  D1A Core ML trunk (or vision encoder) check, see D1AProbe
+    ///   -removeDocuments a,b  delete those paths under Documents (side-loaded data no longer needed)
     ///   -d1aPlan [folder]     MLComputePlan device per op + timed predictions for Documents/d1a/<folder, plan>/*.mlpackage
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
     ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
@@ -500,6 +501,15 @@ struct ContentView: View {
             ttsUnloadAll()
             VLMService.log("d1a: adapter start fp=\(VLMService.footprintMB)MB")
             await D1AProbe.runAdapter(vlm: vlmService)
+            return
+        }
+        if let paths = value("-removeDocuments") {
+            // devicectl can copy into the container but not delete from it.
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            for path in paths.split(separator: ",").map(String.init) where !path.contains("..") {
+                let removed = (try? FileManager.default.removeItem(at: docs.appendingPathComponent(path))) != nil
+                VLMService.log("debug: remove Documents/\(path) \(removed ? "OK" : "skipped")")
+            }
             return
         }
         if args.contains("-d1aPlan") {
