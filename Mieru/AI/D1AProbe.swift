@@ -207,12 +207,13 @@ enum D1AProbe {
         }
     }
 
-    /// Weight-format placement check: every Documents/d1a/plan/*.mlpackage is compiled, then for
-    /// CPU_AND_NE and ALL logs each op's preferred / supported device from MLComputePlan and runs
-    /// x.bin ([1, 64, 1536] fp16) through it. Outputs go to out_<model>_<units>.f32 next to them.
-    static func runPlan() async {
+    /// Weight-format placement check: every Documents/d1a/<folder>/*.mlpackage is compiled, then for
+    /// CPU_AND_NE and ALL logs each op's preferred / supported device from MLComputePlan and runs the
+    /// first L rows of x.bin ([1, 64, 1536] fp16, L from the model's input "x"), timed over 20 warm calls.
+    /// Outputs go to out_<model>_<units>.f32 next to them.
+    static func runPlan(folder: String) async {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("d1a/plan")
+            .appendingPathComponent("d1a/\(folder)")
         func name(_ d: MLComputeDevice) -> String {
             switch d {
             case .cpu: return "cpu"
@@ -245,12 +246,16 @@ enum D1AProbe {
                         let t = now()
                         let m = try await MLModel.load(contentsOf: compiled, configuration: config)
                         let tl = now() - t
-                        let input = try MLDictionaryFeatureProvider(dictionary: ["x": MLFeatureValue(multiArray: x)])
+                        let shape = m.modelDescription.inputDescriptionsByName["x"]!.multiArrayConstraint!.shape
+                        let xm = try MLMultiArray(shape: shape, dataType: .float16)
+                        xm.dataPointer.copyMemory(from: x.dataPointer, byteCount: xm.count * 2)   // first L rows
+                        let input = try MLDictionaryFeatureProvider(dictionary: ["x": MLFeatureValue(multiArray: xm)])
                         let outName = m.modelDescription.outputDescriptionsByName.keys.first!
                         _ = try await m.prediction(from: input)   // warm-up
+                        var out: MLMultiArray!
                         let tp = now()
-                        let out = try await m.prediction(from: input).featureValue(for: outName)!.multiArrayValue!
-                        let tpred = now() - tp
+                        for _ in 0..<20 { out = try await m.prediction(from: input).featureValue(for: outName)!.multiArrayValue! }
+                        let tpred = (now() - tp) / 20
                         var f = [Float](repeating: 0, count: out.count)
                         if out.dataType == .float16 {
                             let p = out.dataPointer.bindMemory(to: Float16.self, capacity: out.count)
@@ -261,7 +266,7 @@ enum D1AProbe {
                         }
                         try f.withUnsafeBufferPointer { Data(buffer: $0) }
                             .write(to: dir.appendingPathComponent("out_\(model)_\(label).f32"))
-                        log(String(format: "plan %@ %@: load %.2fs, predict OK %.2f ms, out %@ %@ first=%.4f",
+                        log(String(format: "plan %@ %@: load %.2fs, predict OK %.3f ms (mean of 20), out %@ %@ first=%.4f",
                                    model, label, tl, tpred * 1000, outName, out.shape.description, f[0]))
                     } catch {
                         log("plan \(model) \(label): FAILED \(error)")

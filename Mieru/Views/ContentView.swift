@@ -463,7 +463,7 @@ struct ContentView: View {
     ///                         irodoricoreml = the same model on Core ML)
     ///   -irodoriCoreMLUnits gpu|ane  Core ML Irodori encoder/duration/decoder units (read by IrodoriCoreMLService)
     ///   -d1aProbe ane|gpu|cpu|all [-d1aVision]  D1A Core ML trunk (or vision encoder) check, see D1AProbe
-    ///   -d1aPlan              MLComputePlan device per op + one prediction for Documents/d1a/plan/*.mlpackage
+    ///   -d1aPlan [folder]     MLComputePlan device per op + timed predictions for Documents/d1a/<folder, plan>/*.mlpackage
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
     ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
     ///   -ttsBench coreml-gpu,coreml-ane,mlx [-benchRuns N] [-benchSustainMinutes M]  synthesis-only Irodori
@@ -505,7 +505,7 @@ struct ContentView: View {
         if args.contains("-d1aPlan") {
             vlmService.unload()
             ttsUnloadAll()
-            await D1AProbe.runPlan()
+            await D1AProbe.runPlan(folder: value("-d1aPlan") ?? "plan")
             return
         }
         if let units = value("-d1aProbe") {
