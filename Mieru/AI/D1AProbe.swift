@@ -207,6 +207,73 @@ enum D1AProbe {
         }
     }
 
+    /// Weight-format placement check: every Documents/d1a/plan/*.mlpackage is compiled, then for
+    /// CPU_AND_NE and ALL logs each op's preferred / supported device from MLComputePlan and runs
+    /// x.bin ([1, 64, 1536] fp16) through it. Outputs go to out_<model>_<units>.f32 next to them.
+    static func runPlan() async {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("d1a/plan")
+        func name(_ d: MLComputeDevice) -> String {
+            switch d {
+            case .cpu: return "cpu"
+            case .gpu: return "gpu"
+            case .neuralEngine: return "ane"
+            @unknown default: return "?"
+            }
+        }
+        do {
+            let x = try array(dir.appendingPathComponent("x.bin"), [1, 64, 1536], .float16)
+            let packages = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "mlpackage" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+            for pkg in packages {
+                let model = pkg.deletingPathExtension().lastPathComponent
+                let compiled: URL
+                do { compiled = try await MLModel.compileModel(at: pkg) } catch {
+                    log("plan \(model): compile FAILED \(error)"); continue
+                }
+                for (label, units) in [("cpu_and_ne", MLComputeUnits.cpuAndNeuralEngine), ("all", .all)] {
+                    let config = MLModelConfiguration()
+                    config.computeUnits = units
+                    do {
+                        let plan = try await MLComputePlan.load(contentsOf: compiled, configuration: config)
+                        guard case let .program(program) = plan.modelStructure,
+                              let main = program.functions["main"] else { log("plan \(model) \(label): not a program"); continue }
+                        for op in main.block.operations {
+                            guard let usage = plan.deviceUsage(for: op) else { continue }
+                            log("plan \(model) \(label): \(op.operatorName) preferred=\(name(usage.preferred)) supported=\(usage.supported.map(name).joined(separator: ","))")
+                        }
+                        let t = now()
+                        let m = try await MLModel.load(contentsOf: compiled, configuration: config)
+                        let tl = now() - t
+                        let input = try MLDictionaryFeatureProvider(dictionary: ["x": MLFeatureValue(multiArray: x)])
+                        let outName = m.modelDescription.outputDescriptionsByName.keys.first!
+                        _ = try await m.prediction(from: input)   // warm-up
+                        let tp = now()
+                        let out = try await m.prediction(from: input).featureValue(for: outName)!.multiArrayValue!
+                        let tpred = now() - tp
+                        var f = [Float](repeating: 0, count: out.count)
+                        if out.dataType == .float16 {
+                            let p = out.dataPointer.bindMemory(to: Float16.self, capacity: out.count)
+                            for i in 0..<out.count { f[i] = Float(p[i]) }
+                        } else {
+                            let p = out.dataPointer.bindMemory(to: Float.self, capacity: out.count)
+                            for i in 0..<out.count { f[i] = p[i] }
+                        }
+                        try f.withUnsafeBufferPointer { Data(buffer: $0) }
+                            .write(to: dir.appendingPathComponent("out_\(model)_\(label).f32"))
+                        log(String(format: "plan %@ %@: load %.2fs, predict OK %.2f ms, out %@ %@ first=%.4f",
+                                   model, label, tl, tpred * 1000, outName, out.shape.description, f[0]))
+                    } catch {
+                        log("plan \(model) \(label): FAILED \(error)")
+                    }
+                }
+            }
+            log("plan DONE")
+        } catch {
+            log("plan FAILED: \(error)")
+        }
+    }
+
     /// `feedsDir` holds text feeds, or photo feeds (pixels.bin + image_rows.bin) that first go
     /// through the vision encoder. Answers are compared with `baseline` (the Mac run of the same
     /// build) when present, otherwise with each feed's fp32 `ref`.
