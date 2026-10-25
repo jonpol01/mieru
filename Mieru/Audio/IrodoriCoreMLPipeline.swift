@@ -270,7 +270,7 @@ final class IrodoriCoreMLPipeline: @unchecked Sendable {
             textD.replaceSubrange(0..<(min(n, Self.ditTextLen) * Self.dim), with: ts[0..<(min(n, Self.ditTextLen) * Self.dim)])
             let textState = try Self.f16(textD, [1, Self.ditTextLen, Self.dim])
             let latentLen = try Self.i32([Int32(frames)], [1])
-            var x = Self.gaussian(frames * Self.latentDim) + [Float](repeating: 0, count: (S - frames) * Self.latentDim)
+            var x = Self.gaussian(frames * Self.latentDim, seed: IrodoriTTSService.speakerSeed(for: caption)) + [Float](repeating: 0, count: (S - frames) * Self.latentDim)
             for i in 0..<Self.numSteps {
                 try Task.checkCancellation()
                 let t = 1 - Float(i) / Float(Self.numSteps)
@@ -427,17 +427,30 @@ final class IrodoriCoreMLPipeline: @unchecked Sendable {
         return frames
     }
 
-    /// Standard normal noise (Box–Muller).
-    static func gaussian(_ count: Int) -> [Float] {
+    /// Standard normal noise (Box–Muller). Restarting from the same seed for every segment gives
+    /// each frame the same noise, so a voice keeps its speaker across segments and utterances.
+    static func gaussian(_ count: Int, seed: UInt64) -> [Float] {
+        var rng = SplitMix64(state: seed)
         var out: [Float] = []
         out.reserveCapacity(count + 1)
         while out.count < count {
-            let r = (-2 * log(Float.random(in: Float.ulpOfOne..<1))).squareRoot()
-            let theta = 2 * Float.pi * Float.random(in: 0..<1)
+            let r = (-2 * log(Float.random(in: Float.ulpOfOne..<1, using: &rng))).squareRoot()
+            let theta = 2 * Float.pi * Float.random(in: 0..<1, using: &rng)
             out.append(r * cos(theta))
             out.append(r * sin(theta))
         }
         return Array(out.prefix(count))
+    }
+
+    private struct SplitMix64: RandomNumberGenerator {
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state &+= 0x9e37_79b9_7f4a_7c15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xbf58_476d_1ce4_e5b9
+            z = (z ^ (z >> 27)) &* 0x94d0_49bb_1331_11eb
+            return z ^ (z >> 31)
+        }
     }
 
     // MARK: - MLMultiArray helpers (stride-aware: Core ML outputs may be padded)

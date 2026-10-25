@@ -40,6 +40,12 @@ class IrodoriTTSService {
         "低く落ち着いた渋い男性の声",
     ]
 
+    /// A caption only describes a kind of voice; the speaker comes from the sampler's noise. Seeding
+    /// the noise from the caption (FNV-1a, stable across launches) keeps one speaker per voice.
+    nonisolated static func speakerSeed(for caption: String) -> UInt64 {
+        caption.utf8.reduce(0xcbf2_9ce4_8422_2325) { ($0 ^ UInt64($1)) &* 0x100_0000_01b3 }
+    }
+
     /// Used until a voice is picked: 「優しく穏やかな女性の声」. Shared with the Core ML engine.
     static var defaultVoice: String { voices[2] }
 
@@ -150,6 +156,7 @@ class IrodoriTTSService {
             // Whole-utterance generate (flow-matching) on a background task.
             let t0 = CFAbsoluteTimeGetCurrent()
             let samples: [Float] = try await Task.detached {
+                MLXRandom.seed(Self.speakerSeed(for: voice))
                 let audio = try await capturedModel.generate(
                     text: cleanText, voice: voice, refAudio: nil, refText: nil, language: nil)
                 return audio.asArray(Float.self)
@@ -288,7 +295,8 @@ extension IrodoriTTSService {
         let voice = selectedVoice ?? Self.defaultVoice
         MLX.Memory.clearCache()
         let samples: [Float] = try await Task.detached {
-            try await model.generate(text: cleanText, voice: voice, refAudio: nil, refText: nil, language: nil)
+            MLXRandom.seed(Self.speakerSeed(for: voice))
+            return try await model.generate(text: cleanText, voice: voice, refAudio: nil, refText: nil, language: nil)
                 .asArray(Float.self)
         }.value
         var phases: [String: Double] = [:]
