@@ -14,6 +14,8 @@ class ModelCatalog {
 
     static let shared = ModelCatalog()
 
+    static let d1aQATId = "local:d1a-e2b-it-qat"
+
     /// All known models (built-in + custom).
     var models: [ModelInfo] = []
 
@@ -42,26 +44,25 @@ class ModelCatalog {
     // MARK: - Built-in Models
 
     static let builtIn: [ModelInfo] = [
-        // VLMs — Gemma 4
+        // VLMs — Gemma 4. D1A-E2B-it QAT is Google's QAT trunk with D1A's decision adapter inside it, side-loaded
+        // into Documents/models/d1a-e2b-it-qat (VLMService.localModelDirectory); choosing it turns D1A decisions on.
+        ModelInfo(
+            id: ModelCatalog.d1aQATId,
+            displayName: "D1A-E2B-it QAT 4-bit (Gemma 4 + D1A)",
+            family: .gemma, kind: .vlm,
+            architecture: "Gemma 4 + D1A", modelType: "Gemma4_VLM_D1A",
+            format: .mlx,
+            contextLength: 131072, batch: 1, chunks: 1,
+            estimatedSizeGB: 3.7
+        ),
         ModelInfo(
             id: "mlx-community/gemma-4-e2b-it-4bit",
-            displayName: "Gemma 4 E2B 4-bit",
+            displayName: "Gemma 4 E2B 4-bit (no D1A)",
             family: .gemma, kind: .vlm,
             architecture: "Gemma 4", modelType: "Gemma4_VLM",
             format: .mlx,
             contextLength: 131072, batch: 1, chunks: 1,
             estimatedSizeGB: 3.6
-        ),
-        // QAT variant — Google's quantization-aware training, slightly larger but better quality.
-        // KV-sharing (layers 15+) is supported by the official mlx-swift-lm @ a47894a.
-        ModelInfo(
-            id: "mlx-community/gemma-4-E2B-it-qat-4bit",
-            displayName: "Gemma 4 E2B QAT 4-bit",
-            family: .gemma, kind: .vlm,
-            architecture: "Gemma 4", modelType: "Gemma4_QAT",
-            format: .mlx,
-            contextLength: 131072, batch: 1, chunks: 1,
-            estimatedSizeGB: 4.36
         ),
 
         // TTS — Kokoro (lightweight, CoreML / Neural Engine, EN + JA)
@@ -149,7 +150,9 @@ class ModelCatalog {
     }
 
     var defaultVLMId: String {
-        activeVLMId ?? "mlx-community/gemma-4-e2b-it-4bit"
+        if let activeVLMId { return activeVLMId }
+        let d1a = VLMService.localModelDirectory(Self.d1aQATId)!
+        return FileManager.default.fileExists(atPath: d1a.path) ? Self.d1aQATId : "mlx-community/gemma-4-e2b-it-4bit"
     }
 
     var defaultTTSId: String {
@@ -179,6 +182,10 @@ class ModelCatalog {
             downloadedIds = Set(ids)
         }
         activeVLMId = UserDefaults.standard.string(forKey: activeVLMIdKey)
+        if activeVLMId == "mlx-community/gemma-4-E2B-it-qat-4bit" {   // removed from the list
+            activeVLMId = nil
+            UserDefaults.standard.removeObject(forKey: activeVLMIdKey)
+        }
         activeTTSId = UserDefaults.standard.string(forKey: activeTTSIdKey)
         if activeTTSId == "mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit",
            !UserDefaults.standard.bool(forKey: "mieru.irodoriV41Migrated") {
@@ -248,6 +255,7 @@ class ModelCatalog {
 
     /// Possible HuggingFace cache paths for a model.
     private func cacheCandidatePaths(for model: ModelInfo) -> [URL] {
+        if let local = VLMService.localModelDirectory(model.id) { return [local] }
         let orgName = model.id.replacingOccurrences(of: "/", with: "--")
         let dirName = "models--\(orgName)"
 

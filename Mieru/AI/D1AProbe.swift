@@ -39,7 +39,7 @@ enum D1AProbe {
 
     /// Describe-flow smoke test: the cases in describe_flow.json through the in-app decide path.
     static func runFlow(vlm: VLMService) async {
-        let url = await vlm.d1aDirectory.appendingPathComponent("describe_flow.json")
+        guard let url = await vlm.d1aDirectory?.appendingPathComponent("describe_flow.json") else { log("flow: no D1A model active"); return }
         guard let data = try? Data(contentsOf: url),
               let flow = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let cases = flow["cases"] as? [[String: Any]] else { log("flow: no describe_flow.json"); return }
@@ -60,7 +60,7 @@ enum D1AProbe {
     /// Each question runs as one causal row (<bos> <state> state <q> branch <decide>), which equals
     /// D1A's packed block-causal encoding for that question.
     static func runAdapter(vlm: VLMService) async {
-        let dir = await vlm.d1aDirectory
+        guard let dir = await vlm.d1aDirectory else { log("adapter: no D1A model active"); return }
         log("adapter dir \(dir.deletingLastPathComponent().lastPathComponent)/\(dir.lastPathComponent)")
         do {
             let summary = try await vlm.debugPerform { context -> String in
@@ -168,7 +168,7 @@ enum D1AProbe {
     /// pixels and, with `macPixels`, fed in their place to separate the resize from the model.
     /// With `pilResize`, the jpg is resized by `PILResize` to the processor's size instead.
     static func runPhotos(vlm: VLMService, macPixels: Bool, pilResize: Bool) async {
-        let dir = await vlm.d1aDirectory
+        guard let dir = await vlm.d1aDirectory else { log("photo: no D1A model active"); return }
         let photoDir = dir.appendingPathComponent("photo")
         do {
             let out = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

@@ -47,7 +47,6 @@ struct ContentView: View {
     /// Tracks the generation to discard stale results.
     @State private var generation = 0
     /// D1A speak / skip / re-capture after each description (needs the adapter in Documents/d1a/adapter).
-    @AppStorage("d1aEnabled") private var d1aEnabled = false
     @State private var lastSpokenDescription: String?
     #if DEBUG
     /// The camera restarts on every foreground, re-firing onChange(isRunning); run the harness once.
@@ -388,7 +387,7 @@ struct ContentView: View {
             // D1A, when installed and on: re-capture a vague description once, and stay quiet when
             // it repeats the last spoken one. When unsure, speak — a wrong skip costs the listener
             // information, a wrong speak only a few seconds.
-            if d1aEnabled, !result.isEmpty, !result.hasPrefix("VLM error"),
+            if vlmService.d1aAvailable, !result.isEmpty, !result.hasPrefix("VLM error"),
                let p = await vlmService.decide(previous: lastSpokenDescription, new: result) {
                 guard currentGen == generation else { return }
                 let vague = p["vague"] ?? 0
@@ -470,6 +469,7 @@ struct ContentView: View {
     ///   -d1aPlan [folder]     MLComputePlan device per op + timed predictions for Documents/d1a/<folder, plan>/*.mlpackage
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
     ///   -autoCapture [N]      run N capture cycles (default 1), each waiting for the previous to finish
+    ///   -voiceSeeds N [-voiceSeedVoice I]  WAVs of voice I (default 2) with seeds 1...N, to pick a speaker
     ///   -ttsBench coreml-gpu,coreml-ane,mlx [-benchRuns N] [-benchSustainMinutes M]  synthesis-only Irodori
     ///                         benchmark (camera + Gemma freed) → Documents/tts_bench.jsonl, see TTSBench
     private func runDebugLaunchArguments() async {
@@ -493,7 +493,6 @@ struct ContentView: View {
         if let v = value("-irodoriVoice"), let i = Int(v), IrodoriTTSService.voices.indices.contains(i) {
             irodoriService.selectedVoice = IrodoriTTSService.voices[i]   // also the Core ML engine's pick
         }
-        if args.contains("-d1a") { d1aEnabled = true }
         if args.contains("-d1aFlow") {
             ttsUnloadAll()
             await D1AProbe.runFlow(vlm: vlmService)
@@ -542,6 +541,30 @@ struct ContentView: View {
             } else {
                 await D1AProbe.run(units: map[units] ?? .cpuAndNeuralEngine, label: units)
             }
+            return
+        }
+        if let count = value("-voiceSeeds").flatMap(Int.init) {
+            // Speaker sampling for one voice: the same text with seeds 1...count (and the default seed) as
+            // Documents/tts_dumps/voice<i>_seed<k>_*.wav, to pick a seed by ear for chosenSeeds.
+            idleTimer?.invalidate()
+            cameraManager.stop()
+            vlmService.unload()
+            ttsUnloadAll()
+            let index = value("-voiceSeedVoice").flatMap(Int.init) ?? 2
+            let caption = IrodoriTTSService.voices[index]
+            irodoriService.selectedVoice = caption
+            await irodoriCoreMLService.load()
+            let text = "画像には、木製のテーブルの上にノートパソコンとコーヒーカップが置かれています。窓から柔らかい光が差し込んでいます。"
+            let key = IrodoriTTSService.seedOverrideKey(caption)
+            for seed in [0] + Array(1...count) {
+                if seed == 0 { UserDefaults.standard.removeObject(forKey: key) } else { UserDefaults.standard.set(String(seed), forKey: key) }
+                if let result = try? await irodoriCoreMLService.debugSynthesize(text) {
+                    IrodoriTTSService.debugDumpWAV(samples: result.samples, rate: IrodoriCoreMLPipeline.sampleRate,
+                                                   tag: "voice\(index)_seed\(seed == 0 ? "default" : String(seed))")
+                }
+            }
+            UserDefaults.standard.removeObject(forKey: key)
+            IrodoriTTSService.log("voiceSeeds DONE voice=\(index) count=\(count)")
             return
         }
         if let engines = value("-ttsBench") {

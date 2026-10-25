@@ -41,10 +41,21 @@ class IrodoriTTSService {
     ]
 
     /// A caption only describes a kind of voice; the speaker comes from the sampler's noise. Seeding
-    /// the noise from the caption (FNV-1a, stable across launches) keeps one speaker per voice.
+    /// the noise keeps one speaker per voice: a seed picked by ear in `chosenSeeds`, otherwise one derived
+    /// from the caption (FNV-1a, stable across launches). DEBUG builds read an override from
+    /// UserDefaults (`seedOverrideKey`) for -voiceSeeds sampling.
     nonisolated static func speakerSeed(for caption: String) -> UInt64 {
-        caption.utf8.reduce(0xcbf2_9ce4_8422_2325) { ($0 ^ UInt64($1)) &* 0x100_0000_01b3 }
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: seedOverrideKey(caption)), let seed = UInt64(override) {
+            return seed
+        }
+        #endif
+        return chosenSeeds[caption] ?? caption.utf8.reduce(0xcbf2_9ce4_8422_2325) { ($0 ^ UInt64($1)) &* 0x100_0000_01b3 }
     }
+
+    nonisolated static let chosenSeeds: [String: UInt64] = [:]
+
+    nonisolated static func seedOverrideKey(_ caption: String) -> String { "irodoriSeedOverride." + caption }
 
     /// Used until a voice is picked: 「優しく穏やかな女性の声」. Shared with the Core ML engine.
     static var defaultVoice: String { voices[2] }
