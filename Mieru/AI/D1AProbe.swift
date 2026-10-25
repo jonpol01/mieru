@@ -159,6 +159,71 @@ enum D1AProbe {
         }
     }
 
+    /// D1A photo requests on the resident VLM: the D1A folder's photo/ holds photo_rows.json (d1a's own
+    /// encoding: ids, seg, decide_idx, opt_idx per photo) and <photo>.jpg. Pixels come from the app's
+    /// Gemma 4 processor; each question runs as one row (state with the image, then its branch).
+    /// Probabilities go to vlm.log and Documents/d1a_photo.jsonl for comparison with the Mac.
+    static func runPhotos(vlm: VLMService) async {
+        let dir = await vlm.d1aDirectory
+        let photoDir = dir.appendingPathComponent("photo")
+        do {
+            let out = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("d1a_photo.jsonl")
+            try? FileManager.default.removeItem(at: out)
+            let lines = try await vlm.debugPerform { context -> [String] in
+                guard let gemma = context.model as? Gemma4 else { return ["model is not MLXVLM.Gemma4"] }
+                let rowsJSON = (try JSONSerialization.jsonObject(with: Data(contentsOf: photoDir.appendingPathComponent("photo_rows.json")))
+                    as! [String: Any])["rows"] as! [String: [String: Any]]
+                let temperature = Float((try JSONSerialization.jsonObject(
+                    with: Data(contentsOf: dir.appendingPathComponent("d1a_config.json"))) as! [String: Any])["temperature"] as! Double)
+                let head = try MLX.loadArrays(url: dir.appendingPathComponent("head.safetensors")).mapValues { $0.asType(.float32) }
+                let wq = head["q.weight"]!, bq = head["q.bias"]!, wk = head["k.weight"]!, bk = head["k.bias"]!
+                let scale = 1 / sqrtf(Float(wq.dim(0))) / temperature
+                let lora = try LoRAContainer.from(directory: dir)
+                try lora.load(into: gemma)
+                defer { lora.unload(from: gemma) }
+
+                var lines: [String] = []
+                for name in rowsJSON.keys.sorted() {
+                    let row = rowsJSON[name]!
+                    let ids = row["ids"] as! [Int], seg = row["seg"] as! [Int]
+                    let decide = row["decide_idx"] as! [Int], opts = row["opt_idx"] as! [[Int]]
+                    let t = now()
+                    let prepared = try await context.processor.prepare(input: UserInput(
+                        chat: [.user("", images: [.url(photoDir.appendingPathComponent("\(name).jpg"))])]))
+                    guard let image = prepared.image else { lines.append("\(name): processor gave no image"); continue }
+                    let appTokens = (prepared.text.tokens .== 258880).asType(.int32).sum().item(Int.self)
+                    let state = zip(ids, seg).filter { $0.1 == 0 }.map(\.0)
+                    var probs: [[Double]] = []
+                    for q in decide.indices {
+                        let start = seg.firstIndex(of: q + 1)!
+                        let branch = zip(ids, seg).filter { $0.1 == q + 1 }.map(\.0)
+                        let local = { (i: Int) in state.count + i - start }
+                        let input = LMInput(text: .init(tokens: MLXArray((state + branch).map { Int32($0) }).expandedDimensions(axis: 0)),
+                                            image: image)
+                        let h = try gemma.hiddenStates(input)[0].asType(.float32)
+                        let hq = matmul(h[local(decide[q])], wq.T) + bq
+                        let hk = matmul(h[MLXArray(opts[q].map { Int32(local($0)) })], wk.T) + bk
+                        let p = softmax(matmul(hk, hq) * scale, axis: -1)
+                        eval(p)
+                        probs.append(p.asArray(Float.self).map { Double($0) })
+                    }
+                    let line = String(format: "%@: image tokens app=%d d1a=%d | %@ | %.2fs", name, appTokens, row["soft_tokens"] as! Int,
+                                      probs.map { $0.map { String(format: "%.3f", $0) }.joined(separator: " ") }.joined(separator: " / "), now() - t)
+                    lines.append(line)
+                    let json = try JSONSerialization.data(withJSONObject: ["photo": name, "app_image_tokens": appTokens, "p": probs])
+                    if let h = try? FileHandle(forWritingTo: out) { h.seekToEndOfFile(); h.write(json + Data("\n".utf8)); try? h.close() }
+                    else { try (json + Data("\n".utf8)).write(to: out) }
+                }
+                return lines
+            }
+            for line in lines { log("photo " + line) }
+            log("photo DONE fp=\(VLMService.footprintMB)MB peak=\(VLMService.peakFootprintMB)MB")
+        } catch {
+            log("photo FAILED: \(String(describing: error))")
+        }
+    }
+
     /// Vision encoder check: Documents/d1a/vision/{VisionEncoder.mlmodelc, pixels_i.bin, embeds_i.bin}
     /// against the transformers fp32 reference. Gate: min per-row cosine >= 0.98.
     static func runVision(units: MLComputeUnits, label: String) async {

@@ -68,7 +68,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/jonpol01/mlx-swift-lm",
       "state" : {
-        "revision" : "ff980cfbc4c9532d168b1df4f24ae5e92c09a0f4"
+        "revision" : "98c582212419a285acb3a98d06637f53522439a5"
       }
     },
     {

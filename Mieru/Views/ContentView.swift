@@ -463,6 +463,7 @@ struct ContentView: View {
     ///                         irodoricoreml = the same model on Core ML)
     ///   -irodoriCoreMLUnits gpu|ane  Core ML Irodori encoder/duration/decoder units (read by IrodoriCoreMLService)
     ///   -d1aProbe ane|gpu|cpu|all [-d1aVision]  D1A Core ML trunk (or vision encoder) check, see D1AProbe
+    ///   -d1aPhotos            D1A photo requests (photo_rows.json + jpgs in the D1A folder's photo/), see D1AProbe
     ///   -removeDocuments a,b  delete those paths under Documents (side-loaded data no longer needed)
     ///   -d1aPlan [folder]     MLComputePlan device per op + timed predictions for Documents/d1a/<folder, plan>/*.mlpackage
     ///   -irodoriVoice <0-5>   pick an Irodori VoiceDesign caption
@@ -494,6 +495,11 @@ struct ContentView: View {
         if args.contains("-d1aFlow") {
             ttsUnloadAll()
             await D1AProbe.runFlow(vlm: vlmService)
+            return
+        }
+        if args.contains("-d1aPhotos") {
+            ttsUnloadAll()
+            await D1AProbe.runPhotos(vlm: vlmService)
             return
         }
         if args.contains("-d1aAdapter") {
