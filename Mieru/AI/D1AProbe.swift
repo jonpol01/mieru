@@ -163,7 +163,9 @@ enum D1AProbe {
     /// encoding: ids, seg, decide_idx, opt_idx per photo) and <photo>.jpg. Pixels come from the app's
     /// Gemma 4 processor; each question runs as one row (state with the image, then its branch).
     /// Probabilities go to vlm.log and Documents/d1a_photo.jsonl for comparison with the Mac.
-    static func runPhotos(vlm: VLMService) async {
+    /// <photo>_pixels.f32 + mac_pixels.json (the Mac processor's [1, 3, H, W]) are compared with the app's
+    /// pixels and, with `macPixels`, fed in their place to separate the resize from the model.
+    static func runPhotos(vlm: VLMService, macPixels: Bool) async {
         let dir = await vlm.d1aDirectory
         let photoDir = dir.appendingPathComponent("photo")
         do {
@@ -174,6 +176,8 @@ enum D1AProbe {
                 guard let gemma = context.model as? Gemma4 else { return ["model is not MLXVLM.Gemma4"] }
                 let rowsJSON = (try JSONSerialization.jsonObject(with: Data(contentsOf: photoDir.appendingPathComponent("photo_rows.json")))
                     as! [String: Any])["rows"] as! [String: [String: Any]]
+                let macShapes = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: photoDir.appendingPathComponent("mac_pixels.json"))))
+                    as? [String: [Int]]) ?? [:]
                 let temperature = Float((try JSONSerialization.jsonObject(
                     with: Data(contentsOf: dir.appendingPathComponent("d1a_config.json"))) as! [String: Any])["temperature"] as! Double)
                 let head = try MLX.loadArrays(url: dir.appendingPathComponent("head.safetensors")).mapValues { $0.asType(.float32) }
@@ -191,7 +195,24 @@ enum D1AProbe {
                     let t = now()
                     let prepared = try await context.processor.prepare(input: UserInput(
                         chat: [.user("", images: [.url(photoDir.appendingPathComponent("\(name).jpg"))])]))
-                    guard let image = prepared.image else { lines.append("\(name): processor gave no image"); continue }
+                    guard let appImage = prepared.image else { lines.append("\(name): processor gave no image"); continue }
+                    var image = appImage
+                    var pixelNote = "app px \(appImage.pixels.shape)"
+                    if let raw = try? Data(contentsOf: photoDir.appendingPathComponent("\(name)_pixels.f32")),
+                       let shape = macShapes[name] {
+                        let mac = MLXArray(raw.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }, shape)
+                        let app = appImage.pixels.ndim == 3 ? appImage.pixels.expandedDimensions(axis: 0) : appImage.pixels
+                        if app.shape == mac.shape {
+                            let d = abs(app.asType(.float32) - mac)
+                            pixelNote += String(format: " vs mac max|d| %.4f mean|d| %.5f", d.max().item(Float.self), d.mean().item(Float.self))
+                        } else {
+                            pixelNote += " vs mac \(shape)"
+                        }
+                        if macPixels {
+                            image = LMInput.ProcessedImage(pixels: mac)
+                            pixelNote += " [mac pixels fed]"
+                        }
+                    }
                     let appTokens = (prepared.text.tokens .== 258880).asType(.int32).sum().item(Int.self)
                     let state = zip(ids, seg).filter { $0.1 == 0 }.map(\.0)
                     var probs: [[Double]] = []
@@ -208,10 +229,12 @@ enum D1AProbe {
                         eval(p)
                         probs.append(p.asArray(Float.self).map { Double($0) })
                     }
-                    let line = String(format: "%@: image tokens app=%d d1a=%d | %@ | %.2fs", name, appTokens, row["soft_tokens"] as! Int,
-                                      probs.map { $0.map { String(format: "%.3f", $0) }.joined(separator: " ") }.joined(separator: " / "), now() - t)
+                    let line = String(format: "%@: image tokens app=%d d1a=%d | %@ | %.2fs | %@", name, appTokens, row["soft_tokens"] as! Int,
+                                      probs.map { $0.map { String(format: "%.3f", $0) }.joined(separator: " ") }.joined(separator: " / "), now() - t,
+                                      pixelNote)
                     lines.append(line)
-                    let json = try JSONSerialization.data(withJSONObject: ["photo": name, "app_image_tokens": appTokens, "p": probs])
+                    let json = try JSONSerialization.data(withJSONObject: ["photo": name, "app_image_tokens": appTokens, "p": probs,
+                                                                           "mac_pixels": macPixels && macShapes[name] != nil])
                     if let h = try? FileHandle(forWritingTo: out) { h.seekToEndOfFile(); h.write(json + Data("\n".utf8)); try? h.close() }
                     else { try (json + Data("\n".utf8)).write(to: out) }
                 }
