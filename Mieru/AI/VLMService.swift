@@ -378,3 +378,67 @@ class VLMService {
     }
     #endif
 }
+
+/// Bicubic resize that reproduces PIL's `Image.resize(..., BICUBIC)` on 8-bit RGB, which the Hugging Face
+/// Gemma 4 processor uses: Keys cubic (a = -0.5), support widened when shrinking (antialiasing), pixel
+/// centres, horizontal then vertical pass, fixed-point weights and 8-bit rounding after each pass.
+enum PILResize {
+    private static let precisionBits = 32 - 8 - 2
+
+    /// RGB bytes (`width * height * 3`, row-major) of `image` resized to `width` x `height`.
+    static func bicubicRGB(_ image: CGImage, width: Int, height: Int) -> [UInt8] {
+        let w = image.width, h = image.height
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        rgba.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        }
+        var rgb = [UInt8](repeating: 0, count: w * h * 3)
+        for i in 0..<(w * h) { for c in 0..<3 { rgb[i * 3 + c] = rgba[i * 4 + c] } }
+        // Rows first (w -> width), then columns (h -> height), as PIL does.
+        let wide = width == w ? rgb
+            : pass(rgb, lines: h, inSize: w, outSize: width, srcLine: w * 3, srcStep: 3, dstLine: width * 3, dstStep: 3)
+        return height == h ? wide
+            : pass(wide, lines: width, inSize: h, outSize: height, srcLine: 3, srcStep: width * 3, dstLine: 3, dstStep: width * 3)
+    }
+
+    /// Resamples `lines` independent lines of `inSize` RGB pixels to `outSize`; strides are in bytes.
+    private static func pass(_ src: [UInt8], lines: Int, inSize: Int, outSize: Int,
+                             srcLine: Int, srcStep: Int, dstLine: Int, dstStep: Int) -> [UInt8] {
+        let scale = Double(inSize) / Double(outSize)
+        let filterScale = max(scale, 1)
+        let support = 2 * filterScale
+        let taps: [(start: Int, weights: [Int64])] = (0..<outSize).map { x in
+            let center = (Double(x) + 0.5) * scale
+            let lo = max(Int(center - support + 0.5), 0), hi = min(Int(center + support + 0.5), inSize)
+            var k = (lo..<hi).map { cubic((Double($0) - center + 0.5) / filterScale) }
+            let total = k.reduce(0, +)
+            if total != 0 { k = k.map { $0 / total } }
+            let one = Double(1 << precisionBits)
+            return (lo, k.map { Int64($0 < 0 ? -0.5 + $0 * one : 0.5 + $0 * one) })
+        }
+        var dst = [UInt8](repeating: 0, count: lines * outSize * 3)
+        for line in 0..<lines {
+            for x in 0..<outSize {
+                let (start, weights) = taps[x]
+                for c in 0..<3 {
+                    var acc = Int64(1) << (precisionBits - 1)
+                    for (i, wgt) in weights.enumerated() {
+                        acc += Int64(src[line * srcLine + (start + i) * srcStep + c]) * wgt
+                    }
+                    dst[line * dstLine + x * dstStep + c] = UInt8(clamping: acc >> Int64(precisionBits))
+                }
+            }
+        }
+        return dst
+    }
+
+    private static func cubic(_ v: Double) -> Double {
+        let a = -0.5, x = abs(v)
+        if x < 1 { return ((a + 2) * x - (a + 3)) * x * x + 1 }
+        if x < 2 { return (((x - 5) * x + 8) * x - 4) * a }
+        return 0
+    }
+}

@@ -11,6 +11,7 @@
 import Accelerate
 import CoreML
 import Foundation
+import ImageIO
 import MLX
 import MLXLMCommon
 @_spi(GemmaEncoder) import MLXVLM
@@ -165,7 +166,8 @@ enum D1AProbe {
     /// Probabilities go to vlm.log and Documents/d1a_photo.jsonl for comparison with the Mac.
     /// <photo>_pixels.f32 + mac_pixels.json (the Mac processor's [1, 3, H, W]) are compared with the app's
     /// pixels and, with `macPixels`, fed in their place to separate the resize from the model.
-    static func runPhotos(vlm: VLMService, macPixels: Bool) async {
+    /// With `pilResize`, the jpg is resized by `PILResize` to the processor's size instead.
+    static func runPhotos(vlm: VLMService, macPixels: Bool, pilResize: Bool) async {
         let dir = await vlm.d1aDirectory
         let photoDir = dir.appendingPathComponent("photo")
         do {
@@ -198,10 +200,21 @@ enum D1AProbe {
                     guard let appImage = prepared.image else { lines.append("\(name): processor gave no image"); continue }
                     var image = appImage
                     var pixelNote = "app px \(appImage.pixels.shape)"
+                    // A <photo>.png (decoded on the Mac) keeps JPEG decoder differences out of the comparison.
+                    let png = photoDir.appendingPathComponent("\(name).png")
+                    let decoded = FileManager.default.fileExists(atPath: png.path) ? png : photoDir.appendingPathComponent("\(name).jpg")
+                    if pilResize, let source = CGImageSourceCreateWithURL(decoded as CFURL, nil),
+                       let cg = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                        let shape = appImage.pixels.shape, height = shape[shape.count - 2], width = shape[shape.count - 1]
+                        let rgb = PILResize.bicubicRGB(cg, width: width, height: height)
+                        let hwc = MLXArray(rgb.map { Float($0) / 255 }, [height, width, 3])
+                        image = LMInput.ProcessedImage(pixels: hwc.transposed(2, 0, 1).expandedDimensions(axis: 0))
+                        pixelNote = "pil px [1, 3, \(height), \(width)] from \(decoded.pathExtension)"
+                    }
                     if let raw = try? Data(contentsOf: photoDir.appendingPathComponent("\(name)_pixels.f32")),
                        let shape = macShapes[name] {
                         let mac = MLXArray(raw.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }, shape)
-                        let app = appImage.pixels.ndim == 3 ? appImage.pixels.expandedDimensions(axis: 0) : appImage.pixels
+                        let app = image.pixels.ndim == 3 ? image.pixels.expandedDimensions(axis: 0) : image.pixels
                         if app.shape == mac.shape {
                             let d = abs(app.asType(.float32) - mac)
                             pixelNote += String(format: " vs mac max|d| %.4f mean|d| %.5f", d.max().item(Float.self), d.mean().item(Float.self))
