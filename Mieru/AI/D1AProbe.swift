@@ -38,7 +38,7 @@ enum D1AProbe {
 
     /// Describe-flow smoke test: the cases in describe_flow.json through the in-app decide path.
     static func runFlow(vlm: VLMService) async {
-        let url = VLMService.d1aDirectory.appendingPathComponent("describe_flow.json")
+        let url = await vlm.d1aDirectory.appendingPathComponent("describe_flow.json")
         guard let data = try? Data(contentsOf: url),
               let flow = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let cases = flow["cases"] as? [[String: Any]] else { log("flow: no describe_flow.json"); return }
@@ -54,13 +54,13 @@ enum D1AProbe {
         log("flow DONE")
     }
 
-    /// MLX adapter check on the resident Gemma 4 VLM: Documents/d1a/adapter/{adapters.safetensors,
+    /// MLX adapter check on the resident Gemma 4 VLM: the D1A folder ({adapters.safetensors,
     /// adapter_config.json, head.safetensors, d1a_config.json, layout.json, requests.jsonl, gate.json}.
     /// Each question runs as one causal row (<bos> <state> state <q> branch <decide>), which equals
     /// D1A's packed block-causal encoding for that question.
     static func runAdapter(vlm: VLMService) async {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("d1a/adapter")
+        let dir = await vlm.d1aDirectory
+        log("adapter dir \(dir.deletingLastPathComponent().lastPathComponent)/\(dir.lastPathComponent)")
         do {
             let summary = try await vlm.debugPerform { context -> String in
                 guard let gemma = context.model as? Gemma4 else { return "model is not MLXVLM.Gemma4" }

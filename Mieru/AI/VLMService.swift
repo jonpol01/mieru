@@ -110,7 +110,8 @@ class VLMService {
 
         MLX.Memory.cacheLimit = 20 * 1024 * 1024
         statusMessage = "Downloading…"
-        let config = ModelConfiguration(id: modelId)
+        let config = Self.localModelDirectory(modelId).map { ModelConfiguration(directory: $0) }
+            ?? ModelConfiguration(id: modelId)
 
         isDownloading = true
         downloadProgress = 0
@@ -218,12 +219,24 @@ class VLMService {
 
     // MARK: - D1A decisions
 
-    /// D1A's adapter folder; the question set sits next to it as describe_flow.json.
-    static let d1aDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("d1a/adapter")
+    /// "local:<name>" is a side-loaded checkpoint in Documents/models/<name>.
+    static func localModelDirectory(_ modelId: String) -> URL? {
+        guard modelId.hasPrefix("local:") else { return nil }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("models/\(modelId.dropFirst("local:".count))")
+    }
+
+    /// D1A's adapter folder; the question set sits next to it as describe_flow.json. An adapter is
+    /// trained for one trunk, so a side-loaded checkpoint carries its own in d1a/.
+    static func d1aDirectory(for modelId: String) -> URL {
+        localModelDirectory(modelId)?.appendingPathComponent("d1a")
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("d1a/adapter")
+    }
+
+    var d1aDirectory: URL { Self.d1aDirectory(for: currentModelId) }
 
     var d1aAvailable: Bool {
-        FileManager.default.fileExists(atPath: Self.d1aDirectory.appendingPathComponent("adapters.safetensors").path)
+        FileManager.default.fileExists(atPath: d1aDirectory.appendingPathComponent("adapters.safetensors").path)
     }
 
     private var d1a: D1ADecider?
@@ -237,9 +250,9 @@ class VLMService {
         defer { running = false }
         do {
             if d1a == nil {
-                d1a = try D1ADecider(directory: Self.d1aDirectory)
+                d1a = try D1ADecider(directory: d1aDirectory)
                 let flow = try JSONSerialization.jsonObject(
-                    with: Data(contentsOf: Self.d1aDirectory.appendingPathComponent("describe_flow.json"))) as! [String: Any]
+                    with: Data(contentsOf: d1aDirectory.appendingPathComponent("describe_flow.json"))) as! [String: Any]
                 d1aQuestions = D1ADecider.questions(from: flow["questions"] as! [String: Any], order: ["redundant", "vague"])
             }
             let decider = d1a!, questions = d1aQuestions
@@ -259,6 +272,7 @@ class VLMService {
 
     public func unload() {
         loadState = .idle
+        d1a = nil   // the next model may carry a different adapter
         isLoaded = false
         running = false
         output = ""
